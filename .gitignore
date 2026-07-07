@@ -1,0 +1,23 @@
+# Local env / credentials
+.env
+.env.local
+.env.*.local
+.dev.vars
+*_PRIVATE.md
+*credentials*
+
+# Build artifacts
+node_modules/
+dist/
+.wrangler/
+.cache/
+
+# Cloudflare generated types
+worker-configuration.d.ts
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+tsconfig.tsbuildinfo
