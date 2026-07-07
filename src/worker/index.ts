@@ -133,6 +133,19 @@ app.patch("/api/episodes/:id", async (c) => {
   return c.json(row);
 });
 
+// Delete an episode (undo a mis-tap).
+app.delete("/api/episodes/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) return c.json({ error: "bad id" }, 400);
+  const row = await c.env.DB.prepare(
+    `DELETE FROM episodes WHERE id = ? RETURNING id`
+  )
+    .bind(id)
+    .first<{ id: number }>();
+  if (!row) return c.json({ error: "not found" }, 404);
+  return c.json({ ok: true });
+});
+
 // --- Static SPA fallback ---------------------------------------------------
 app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 

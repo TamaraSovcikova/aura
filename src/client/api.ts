@@ -55,3 +55,25 @@ export async function apiList(limit = 30): Promise<Episode[]> {
   });
   return parse<Episode[]>(r, "list");
 }
+
+export async function apiPatch(
+  id: number,
+  body: Partial<Episode>
+): Promise<Episode> {
+  const r = await fetch(`/api/episodes/${id}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  return parse<Episode>(r, "patch");
+}
+
+export async function apiDelete(id: number): Promise<void> {
+  const r = await fetch(`/api/episodes/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (r.status === 401) throw new UnauthorizedError();
+  // 404 is fine: already gone.
+  if (!r.ok && r.status !== 404) throw new Error(`delete failed: ${r.status}`);
+}

@@ -143,6 +143,52 @@ describe("episodes API", () => {
     expect(row.weather_code).toBe(61);
   });
 
+  it("patches editable fields, then deletes the episode", async () => {
+    const s = await app.request(
+      "/api/episodes/start",
+      {
+        method: "POST",
+        headers: authed,
+        body: JSON.stringify({ client_started_at: "2026-07-07T10:00:00.000Z" }),
+      },
+      env(d1)
+    );
+    const { id } = (await s.json()) as { id: number };
+
+    const p = await app.request(
+      `/api/episodes/${id}`,
+      {
+        method: "PATCH",
+        headers: authed,
+        body: JSON.stringify({ severity: 3, note: "worse" }),
+      },
+      env(d1)
+    );
+    expect(p.status).toBe(200);
+    const patched = (await p.json()) as { severity: number; note: string };
+    expect(patched.severity).toBe(3);
+    expect(patched.note).toBe("worse");
+
+    const del = await app.request(
+      `/api/episodes/${id}`,
+      { method: "DELETE", headers: authed },
+      env(d1)
+    );
+    expect(del.status).toBe(200);
+
+    const list = (await (
+      await app.request("/api/episodes?limit=5", { headers: authed }, env(d1))
+    ).json()) as unknown[];
+    expect(list).toHaveLength(0);
+
+    const del2 = await app.request(
+      `/api/episodes/${id}`,
+      { method: "DELETE", headers: authed },
+      env(d1)
+    );
+    expect(del2.status).toBe(404);
+  });
+
   it("rejects an API call without a valid PIN", async () => {
     const res = await app.request(
       "/api/episodes/current",

@@ -3,8 +3,10 @@ import type { Episode } from "../shared/types";
 import { durationMs, formatDuration } from "../shared/format";
 import {
   apiCurrent,
+  apiDelete,
   apiEnd,
   apiList,
+  apiPatch,
   apiStart,
   hasPin,
   setPin,
@@ -48,6 +50,7 @@ export default function App() {
   const [nowTs, setNowTs] = useState(Date.now());
   const [recent, setRecent] = useState<Episode[]>([]);
   const [endPanel, setEndPanel] = useState<LocalEpisode | null>(null);
+  const [editing, setEditing] = useState<Episode | null>(null);
   const [pending, setPending] = useState(0);
   const [online, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine
@@ -199,6 +202,52 @@ export default function App() {
     [endPanel, runSync, refreshRecent]
   );
 
+  const onSaveEdit = useCallback(
+    async (
+      id: number,
+      patch: { severity: number | null; meds: string; note: string }
+    ) => {
+      try {
+        await apiPatch(id, {
+          severity: patch.severity,
+          meds: patch.meds.trim() || null,
+          note: patch.note.trim() || null,
+        });
+        setError(null);
+      } catch (e) {
+        if (e instanceof UnauthorizedError) {
+          setError("That PIN was rejected. Enter it again.");
+          setPinReady(false);
+        }
+      }
+      setEditing(null);
+      refreshRecent();
+    },
+    [refreshRecent]
+  );
+
+  const onDeleteEpisode = useCallback(
+    async (id: number) => {
+      try {
+        await apiDelete(id);
+        // Keep local state consistent if we deleted the currently-open episode.
+        const list = loadOutbox().filter((e) => e.serverId !== id);
+        saveOutbox(list);
+        setOpen(findOpen(list) ?? null);
+        setPending(pendingCount(list));
+        setError(null);
+      } catch (e) {
+        if (e instanceof UnauthorizedError) {
+          setError("That PIN was rejected. Enter it again.");
+          setPinReady(false);
+        }
+      }
+      setEditing(null);
+      refreshRecent();
+    },
+    [refreshRecent]
+  );
+
   if (!pinReady) {
     return <PinGate error={error} onSubmit={() => setPinReady(true)} />;
   }
@@ -243,12 +292,21 @@ export default function App() {
         {error && <p className="text-sm text-rose-400">{error}</p>}
       </main>
 
-      <RecentList episodes={recent} />
+      <RecentList episodes={recent} onSelect={setEditing} />
 
       {endPanel && (
         <EndPanel
           onSave={(d) => finishDetails(d)}
           onSkip={() => finishDetails(null)}
+        />
+      )}
+
+      {editing && (
+        <EditPanel
+          episode={editing}
+          onSave={(patch) => onSaveEdit(editing.id, patch)}
+          onDelete={() => onDeleteEpisode(editing.id)}
+          onCancel={() => setEditing(null)}
         />
       )}
     </div>
@@ -277,7 +335,13 @@ function StatusPill({ online, pending }: { online: boolean; pending: number }) {
   );
 }
 
-function RecentList({ episodes }: { episodes: Episode[] }) {
+function RecentList({
+  episodes,
+  onSelect,
+}: {
+  episodes: Episode[];
+  onSelect: (e: Episode) => void;
+}) {
   if (episodes.length === 0) {
     return (
       <p className="mt-8 text-center text-sm text-slate-500">
@@ -292,27 +356,159 @@ function RecentList({ episodes }: { episodes: Episode[] }) {
       </h2>
       <ul className="divide-y divide-slate-800 rounded-xl bg-slate-900/60">
         {episodes.map((e) => (
-          <li
-            key={e.id}
-            className="flex items-center justify-between px-4 py-3 text-sm"
-          >
-            <span className="text-slate-300">
-              {new Date(e.started_at).toLocaleString([], {
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-            <span className="text-slate-400 tabular-nums">
-              {e.ended_at
-                ? formatDuration(durationMs(e.started_at, e.ended_at))
-                : "ongoing"}
-            </span>
+          <li key={e.id}>
+            <button
+              onClick={() => onSelect(e)}
+              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm transition active:bg-slate-800/60"
+            >
+              <span className="text-slate-300">
+                {new Date(e.started_at).toLocaleString([], {
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                {e.severity ? (
+                  <span className="ml-2 text-slate-500">
+                    {"·".repeat(e.severity)}
+                  </span>
+                ) : null}
+              </span>
+              <span className="text-slate-400 tabular-nums">
+                {e.ended_at
+                  ? formatDuration(durationMs(e.started_at, e.ended_at))
+                  : "ongoing"}
+              </span>
+            </button>
           </li>
         ))}
       </ul>
+      <p className="mt-2 text-center text-xs text-slate-600">
+        Tap an entry to edit or delete it.
+      </p>
     </section>
+  );
+}
+
+function EditPanel({
+  episode,
+  onSave,
+  onDelete,
+  onCancel,
+}: {
+  episode: Episode;
+  onSave: (d: { severity: number | null; meds: string; note: string }) => void;
+  onDelete: () => void;
+  onCancel: () => void;
+}) {
+  const [severity, setSeverity] = useState<number | null>(episode.severity);
+  const [meds, setMeds] = useState(episode.meds ?? "");
+  const [note, setNote] = useState(episode.note ?? "");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const levels: Array<{ v: number; label: string }> = [
+    { v: 1, label: "Mild" },
+    { v: 2, label: "Moderate" },
+    { v: 3, label: "Severe" },
+  ];
+
+  const when = new Date(episode.started_at).toLocaleString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return (
+    <div className="fixed inset-0 z-10 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6">
+      <div className="w-full max-w-md rounded-t-2xl bg-slate-900 p-6 sm:rounded-2xl">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-base font-semibold text-slate-100">Edit entry</h3>
+          <span className="text-xs text-slate-500">{when}</span>
+        </div>
+
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+          Severity
+        </p>
+        <div className="flex gap-2">
+          {levels.map((l) => (
+            <button
+              key={l.v}
+              onClick={() => setSeverity(severity === l.v ? null : l.v)}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm transition ${
+                severity === l.v
+                  ? "bg-indigo-500 text-white"
+                  : "bg-slate-800 text-slate-300"
+              }`}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+          Meds taken
+        </p>
+        <input
+          value={meds}
+          onChange={(e) => setMeds(e.target.value)}
+          placeholder="e.g. sumatriptan 50mg"
+          className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
+        />
+
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+          Note
+        </p>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={2}
+          className="w-full resize-none rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
+        />
+
+        {confirmDelete ? (
+          <div className="mt-6 rounded-lg bg-rose-950/40 p-3">
+            <p className="text-sm text-rose-200">Delete this entry for good?</p>
+            <div className="mt-3 flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="flex-1 rounded-lg bg-slate-800 py-2 text-sm text-slate-300"
+              >
+                Keep
+              </button>
+              <button
+                onClick={onDelete}
+                className="flex-1 rounded-lg bg-rose-600 py-2 text-sm font-medium text-white"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-6 flex items-center gap-3">
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="rounded-lg px-3 py-3 text-sm text-rose-400"
+            >
+              Delete
+            </button>
+            <button
+              onClick={onCancel}
+              className="ml-auto rounded-lg bg-slate-800 px-5 py-3 text-sm text-slate-300"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => onSave({ severity, meds, note })}
+              className="rounded-lg bg-indigo-500 px-5 py-3 text-sm font-medium text-white"
+            >
+              Save
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
