@@ -11,7 +11,9 @@ analysis.
 
 ## Status
 
-Design approved 2026-07-07. Pre-build. Spec in progress.
+Phase 0 built and verified locally 2026-07-07 (capture UI + episodes API + D1 +
+offline outbox + PWA; 16 tests passing). Not deployed to production yet. See
+`docs/SPEC-phase0.md` and CLAUDE.md for how to run.
 
 ## Stack (planned)
 
