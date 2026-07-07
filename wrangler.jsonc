@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "aura",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Run the Worker before static assets for the API so browser navigations
+    // don't get the SPA index.html served over real API routes.
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true },
+  // Create with: wrangler d1 create aura  (then paste database_id here).
+  // Local dev + migrate:local + tests do not need a real id.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "aura",
+      "database_id": "PLACEHOLDER_RUN_wrangler_d1_create_aura",
+      "migrations_dir": "migrations"
+    }
+  ]
+  // Secret (set for prod via `wrangler secret put ACCESS_PIN`; put in .dev.vars
+  // locally). When unset, the Worker allows all requests (fine for local dev).
+}
