@@ -19,7 +19,7 @@
     {
       "binding": "DB",
       "database_name": "aura",
-      "database_id": "PLACEHOLDER_RUN_wrangler_d1_create_aura",
+      "database_id": "9f819e8f-9faa-4510-8f46-b152dcd18695",
       "migrations_dir": "migrations"
     }
   ]
