@@ -12,6 +12,7 @@ import {
   apiEnd,
   apiList,
   apiPatch,
+  apiPremonition,
   apiStart,
   hasPin,
   setPin,
@@ -29,6 +30,12 @@ import {
 } from "./outbox";
 import { currentTz, getCoords } from "./geo";
 import { appendTranscript, listen, supportsVoice } from "./voice";
+import {
+  loadPremOutbox,
+  newPremonition,
+  reconcilePremonitions,
+  savePremOutbox,
+} from "./premonitions";
 
 const startFn: StartFn = async (e) => {
   const ep = await apiStart({
@@ -44,6 +51,20 @@ const endFn: EndFn = async (serverId, body) => {
   await apiEnd(serverId, body);
 };
 
+const sendPremFn = async (p: {
+  felt_at: string;
+  lat: number | null;
+  lon: number | null;
+  tz: string | null;
+}) => {
+  await apiPremonition({
+    client_felt_at: p.felt_at,
+    lat: p.lat ?? undefined,
+    lon: p.lon ?? undefined,
+    tz: p.tz ?? undefined,
+  });
+};
+
 function pendingCount(list: LocalEpisode[]): number {
   return list.filter((e) => !e.startedSynced || (e.ended_at && !e.endedSynced))
     .length;
@@ -56,6 +77,7 @@ export default function App() {
   const [recent, setRecent] = useState<Episode[]>([]);
   const [endPanel, setEndPanel] = useState<LocalEpisode | null>(null);
   const [editing, setEditing] = useState<Episode | null>(null);
+  const [premLoggedAt, setPremLoggedAt] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
   const [online, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine
@@ -82,6 +104,15 @@ export default function App() {
         setError("That PIN was rejected. Enter it again.");
         setPinReady(false);
       }
+    }
+  }, []);
+
+  // Flush any premonitions queued while offline.
+  const flushPremonitions = useCallback(async () => {
+    try {
+      savePremOutbox(await reconcilePremonitions(loadPremOutbox(), sendPremFn));
+    } catch {
+      /* auth errors surface through runSync */
     }
   }, []);
 
@@ -118,13 +149,21 @@ export default function App() {
       }
       if (cancelled) return;
       setOpen(findOpen(loadOutbox()) ?? null);
+      await flushPremonitions();
       await runSync();
       await refreshRecent();
     })();
     return () => {
       cancelled = true;
     };
-  }, [pinReady, runSync, refreshRecent]);
+  }, [pinReady, runSync, refreshRecent, flushPremonitions]);
+
+  // Clear the "logged" confirmation after a moment.
+  useEffect(() => {
+    if (!premLoggedAt) return;
+    const t = setTimeout(() => setPremLoggedAt(null), 5000);
+    return () => clearTimeout(t);
+  }, [premLoggedAt]);
 
   // Tick the elapsed timer while an episode is open.
   useEffect(() => {
@@ -138,6 +177,7 @@ export default function App() {
   useEffect(() => {
     const goOnline = () => {
       setOnline(true);
+      flushPremonitions();
       runSync().then(refreshRecent);
     };
     const goOffline = () => setOnline(false);
@@ -147,7 +187,7 @@ export default function App() {
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
     };
-  }, [runSync, refreshRecent]);
+  }, [runSync, refreshRecent, flushPremonitions]);
 
   const onStart = useCallback(async () => {
     const rec = newLocalEpisode({
@@ -175,6 +215,42 @@ export default function App() {
     }
     runSync();
   }, [runSync]);
+
+  // "I feel one coming." One tap, timestamped instantly, never asks a follow-up.
+  // Queued locally first so a dead connection cannot lose it: unlike weather,
+  // a premonition can never be reconstructed after the fact.
+  const onPremonition = useCallback(async () => {
+    const feltAt = new Date().toISOString();
+    const rec = newPremonition({
+      felt_at: feltAt,
+      lat: null,
+      lon: null,
+      tz: currentTz(),
+    });
+    const list = loadPremOutbox();
+    list.push(rec);
+    savePremOutbox(list);
+    setPremLoggedAt(feltAt); // instant feedback
+
+    const coords = await getCoords();
+    if (coords) {
+      const l2 = loadPremOutbox();
+      const found = l2.find((x) => x.localId === rec.localId);
+      if (found && !found.synced) {
+        found.lat = coords.lat;
+        found.lon = coords.lon;
+        savePremOutbox(l2);
+      }
+    }
+    try {
+      savePremOutbox(await reconcilePremonitions(loadPremOutbox(), sendPremFn));
+    } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        setError("That PIN was rejected. Enter it again.");
+        setPinReady(false);
+      }
+    }
+  }, []);
 
   const onEnd = useCallback(() => {
     const list = loadOutbox();
@@ -294,6 +370,26 @@ export default function App() {
             <span className="mt-2 text-sm opacity-80">tap to start</span>
           </button>
         )}
+
+        {/* The premonition. One tap, no follow-up, never linked to an attack by
+            hand. Deliberately quiet so it cannot compete with the capture button. */}
+        {premLoggedAt ? (
+          <p className="rounded-full bg-slate-800 px-4 py-2 text-sm text-emerald-400">
+            Noted at{" "}
+            {new Date(premLoggedAt).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </p>
+        ) : (
+          <button
+            onClick={onPremonition}
+            className="rounded-full border border-slate-700 px-5 py-2 text-sm text-slate-300 transition active:scale-95 active:bg-slate-800"
+          >
+            I feel one coming
+          </button>
+        )}
+
         {error && <p className="text-sm text-rose-400">{error}</p>}
       </main>
 

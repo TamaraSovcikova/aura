@@ -68,6 +68,29 @@ export async function apiPatch(
   return parse<Episode>(r, "patch");
 }
 
+export interface PremonitionBody {
+  lat?: number;
+  lon?: number;
+  tz?: string;
+  note?: string;
+  client_felt_at?: string;
+}
+
+export async function apiPremonition(body: PremonitionBody): Promise<unknown> {
+  const r = await fetch("/api/premonitions", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  return parse<unknown>(r, "premonition");
+}
+
+export async function apiPremonitionCount(): Promise<number> {
+  const r = await fetch("/api/premonitions?limit=200", { headers: authHeaders() });
+  const list = await parse<unknown[]>(r, "premonitions");
+  return list.length;
+}
+
 export async function apiDelete(id: number): Promise<void> {
   const r = await fetch(`/api/episodes/${id}`, {
     method: "DELETE",

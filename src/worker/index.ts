@@ -158,6 +158,160 @@ app.patch("/api/episodes/:id", async (c) => {
   return c.json(row);
 });
 
+// --- Premonitions ----------------------------------------------------------
+// "I feel one coming." One tap, never linked to an episode by the user.
+
+interface PremonitionBody {
+  lat?: number;
+  lon?: number;
+  tz?: string;
+  note?: string;
+  client_felt_at?: string;
+}
+
+app.post("/api/premonitions", async (c) => {
+  const body = await c.req
+    .json<PremonitionBody>()
+    .catch(() => ({}) as PremonitionBody);
+  const feltAt = body.client_felt_at ?? nowIso();
+  const tz = body.tz ?? null;
+  const lat = typeof body.lat === "number" ? roundCoord(body.lat) : null;
+  const lon = typeof body.lon === "number" ? roundCoord(body.lon) : null;
+  const enr = await fetchEnrichment(body.lat, body.lon);
+
+  const row = await c.env.DB.prepare(
+    `INSERT INTO premonitions
+       (felt_at, local_date, note, tz, lat, lon, weather_code, pressure_hpa, temp_c, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'app')
+     RETURNING *`
+  )
+    .bind(
+      feltAt,
+      localDate(feltAt, tz),
+      body.note ?? null,
+      tz,
+      lat,
+      lon,
+      enr.weather_code,
+      enr.pressure_hpa,
+      enr.temp_c
+    )
+    .first();
+
+  return c.json(row, 201);
+});
+
+app.get("/api/premonitions", async (c) => {
+  const raw = Number(c.req.query("limit") ?? 30);
+  const limit = Math.min(Number.isFinite(raw) && raw > 0 ? raw : 30, 200);
+  const res = await c.env.DB.prepare(
+    `SELECT * FROM premonitions ORDER BY felt_at DESC LIMIT ?`
+  )
+    .bind(limit)
+    .all();
+  return c.json(res.results);
+});
+
+app.delete("/api/premonitions/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) return c.json({ error: "bad id" }, 400);
+  const row = await c.env.DB.prepare(
+    `DELETE FROM premonitions WHERE id = ? RETURNING id`
+  )
+    .bind(id)
+    .first<{ id: number }>();
+  if (!row) return c.json({ error: "not found" }, 404);
+  return c.json({ ok: true });
+});
+
+/**
+ * Derived premonition stats. Nothing here is stored; it is all computed by pairing
+ * each premonition with the next episode that STARTS within `window_hours` of it.
+ *
+ *  - hit_rate     : premonitions actually followed by a headache
+ *  - warning_rate : headaches that were preceded by a premonition
+ *  - lead times   : how long the warning gives her
+ *
+ * Premonitions felt while an episode was already underway are excluded: they are
+ * not premonitory. Imported episodes are eligible as the "followed by" target since
+ * their start date is trustworthy even when the time is not.
+ */
+app.get("/api/premonitions/stats", async (c) => {
+  const raw = Number(c.req.query("window_hours") ?? 24);
+  const windowHours = Math.min(Math.max(Number.isFinite(raw) ? raw : 24, 1), 72);
+  const windowDays = windowHours / 24;
+
+  // All time comparisons go through julianday(). SQLite's datetime() returns
+  // 'YYYY-MM-DD HH:MM:SS' while our timestamps are 'YYYY-MM-DDTHH:MM:SS.sssZ';
+  // comparing those as strings is wrong ('T' sorts after ' '). julianday parses
+  // both and compares as numbers.
+  //
+  // An episode with no ended_at is assumed to run at most 72 hours, the ICHD-3
+  // maximum for a migraine attack. Without that cap, one attack she forgot to
+  // end would look "ongoing" forever and silently swallow every later
+  // premonition from these stats.
+  const paired = await c.env.DB.prepare(
+    `WITH eligible AS (
+       SELECT p.id, p.felt_at
+         FROM premonitions p
+        WHERE NOT EXISTS (
+          SELECT 1 FROM episodes e
+           WHERE e.source = 'app'
+             AND julianday(e.started_at) <= julianday(p.felt_at)
+             AND julianday(COALESCE(e.ended_at, datetime(e.started_at, '+72 hours')))
+                 >= julianday(p.felt_at)
+        )
+     )
+     SELECT g.id,
+            g.felt_at,
+            (SELECT min(e.started_at) FROM episodes e
+              WHERE e.started_at_time_known = 1
+                AND julianday(e.started_at) > julianday(g.felt_at)
+                AND julianday(e.started_at) <= julianday(g.felt_at) + ?) AS next_start
+       FROM eligible g`
+  )
+    .bind(windowDays)
+    .all<{ id: number; next_start: string | null; felt_at: string }>();
+
+  const rows = paired.results;
+  const followed = rows.filter((r) => r.next_start !== null);
+  const leads = followed
+    .map((r) => (Date.parse(r.next_start!) - Date.parse(r.felt_at)) / 3600000)
+    .sort((a, b) => a - b);
+
+  // Only episodes with a known start time can be said to have been "warned":
+  // an imported row anchored at local noon would produce a fictional lead time.
+  const totalEpisodes = await c.env.DB.prepare(
+    `SELECT count(*) AS n FROM episodes WHERE started_at_time_known = 1`
+  ).first<{ n: number }>();
+  const warned = await c.env.DB.prepare(
+    `SELECT count(*) AS n FROM episodes e
+      WHERE e.started_at_time_known = 1
+        AND EXISTS (SELECT 1 FROM premonitions p
+                     WHERE julianday(p.felt_at) < julianday(e.started_at)
+                       AND julianday(e.started_at) <= julianday(p.felt_at) + ?)`
+  )
+    .bind(windowDays)
+    .first<{ n: number }>();
+
+  const median = leads.length
+    ? leads[Math.floor((leads.length - 1) / 2)]
+    : null;
+
+  return c.json({
+    window_hours: windowHours,
+    premonitions_eligible: rows.length,
+    followed_by_headache: followed.length,
+    // Honest about power: these are meaningless on a handful of taps.
+    hit_rate: rows.length ? followed.length / rows.length : null,
+    warning_rate: totalEpisodes?.n ? (warned?.n ?? 0) / totalEpisodes.n : null,
+    lead_hours_median: median,
+    lead_hours_min: leads.length ? leads[0] : null,
+    lead_hours_max: leads.length ? leads[leads.length - 1] : null,
+    enough_data: rows.length >= 10 && followed.length >= 3,
+  });
+});
+
 // Delete an episode (undo a mis-tap).
 app.delete("/api/episodes/:id", async (c) => {
   const id = Number(c.req.param("id"));
