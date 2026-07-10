@@ -46,6 +46,7 @@ const DATA_CAVEATS = [
   "These are Monthly HEADACHE Days (MHD), not Monthly MIGRAINE Days (MMD). ICHD-3 criteria cannot be checked retroactively, so no imported attack is classified as migraine.",
   "Weather does NOT live on the episode: the per-episode pressure columns are mostly NULL because geolocation was rarely granted. Day-level weather lives in the `days` table, keyed on local_date and the location timeline, and covers every day whether or not she had a headache.",
   "Do NOT compare headache days against control days by hand: an unadjusted, unweighted, untested difference is exactly how a false trigger gets believed. Use the `trigger_analysis` tool, which stratifies by place and month and corrects for multiple comparisons, and report its `verdict` field.",
+  "Sleep, steps and heart-rate data must be pushed from an Android reader (Health Connect has no cloud API). Until `control_days.days_with_sleep` is large, sleep reports 'insufficient data' and her belief that poor sleep triggers her migraines remains untestable, not disproven.",
   "Aura records and counts. It never diagnoses and never recommends treatment.",
 ].join(" ");
 
@@ -215,6 +216,15 @@ async function handleTool(
         )
         .all();
       const prem = await db.prepare(`SELECT count(*) AS n FROM premonitions`).first<{ n: number }>();
+      const health = await db
+        .prepare(
+          `SELECT count(*) AS control_days,
+                  sum(sleep_minutes IS NOT NULL) AS days_with_sleep,
+                  sum(steps IS NOT NULL) AS days_with_steps,
+                  sum(resting_hr IS NOT NULL) AS days_with_resting_hr
+             FROM days`
+        )
+        .first();
       // Averaged over COMPLETE months only, and zero-headache months are counted
       // (a GROUP BY would drop them, inflating the mean).
       const meanMhd = complete.length
@@ -227,6 +237,7 @@ async function handleTool(
         mean_headache_days_per_month_complete_months_only: meanMhd,
         severity_distribution: dist.results,
         premonitions_logged: prem?.n ?? 0,
+        control_days: health,
         caveats: DATA_CAVEATS,
       });
     }

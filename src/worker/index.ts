@@ -3,7 +3,8 @@ import type { Bindings } from "./db";
 import { localDate, nowIso, upsertPeakSample, validSeverity } from "./db";
 import { mcp } from "./mcp";
 import { premonitionStats } from "./stats";
-import { backfillDays, refreshRecentDays } from "./days";
+import { backfillDays, refreshRecentDays, upsertHealthDays } from "./days";
+import { aggregateSleepSessions, validateHealthDays } from "../shared/health";
 import { triggerAnalysis } from "./triggers";
 import { fetchEnrichment, roundCoord } from "./enrich";
 import type { Episode, StartBody, EndBody } from "../shared/types";
@@ -295,6 +296,55 @@ app.get("/api/days", async (c) => {
       ORDER BY local_date DESC LIMIT 400`
   ).bind(...binds).all();
   return c.json(res.results);
+});
+
+// Intake for on-device health factors. Health Connect has no cloud API, so an
+// Android reader (or a CSV export from any source) pushes daily aggregates here.
+// Idempotent, merges partial pushes, and never touches the weather columns.
+interface HealthBody {
+  source?: string;
+  tz?: string;
+  days?: unknown[];
+  sleep_sessions?: Array<{ start: string; end: string }>;
+}
+
+app.post("/api/days/health", async (c) => {
+  const body = await c.req.json<HealthBody>().catch(() => ({}) as HealthBody);
+  const source = typeof body.source === "string" ? body.source.slice(0, 40) : "unknown";
+
+  const incoming: unknown[] = Array.isArray(body.days) ? [...body.days] : [];
+
+  // Sleep sessions are the natural shape from Health Connect. Aggregate them onto
+  // the WAKE day: the exposure for a headache on day D is the night that ended
+  // on the morning of D.
+  if (Array.isArray(body.sleep_sessions) && body.sleep_sessions.length) {
+    if (typeof body.tz !== "string" || !body.tz) {
+      return c.json({ error: "tz is required when posting sleep_sessions" }, 400);
+    }
+    incoming.push(...aggregateSleepSessions(body.sleep_sessions, body.tz));
+  }
+
+  if (!incoming.length) return c.json({ error: "nothing to write" }, 400);
+
+  const { valid, rejected } = validateHealthDays(incoming);
+  if (!valid.length) return c.json({ error: "no valid rows", rejected }, 400);
+
+  const { days_written } = await upsertHealthDays(c.env, valid, source);
+  return c.json({ days_written, rejected, source });
+});
+
+app.get("/api/days/health/coverage", async (c) => {
+  const row = await c.env.DB.prepare(
+    `SELECT count(*) AS days_total,
+            sum(sleep_minutes IS NOT NULL) AS days_with_sleep,
+            sum(steps IS NOT NULL) AS days_with_steps,
+            sum(resting_hr IS NOT NULL) AS days_with_resting_hr,
+            sum(hrv_ms IS NOT NULL) AS days_with_hrv,
+            min(CASE WHEN sleep_minutes IS NOT NULL THEN local_date END) AS first_sleep_day,
+            max(CASE WHEN sleep_minutes IS NOT NULL THEN local_date END) AS last_sleep_day
+       FROM days`
+  ).first();
+  return c.json(row);
 });
 
 app.get("/api/triggers", async (c) => c.json(await triggerAnalysis(c.env.DB)));

@@ -9,9 +9,11 @@
 //   1. STRATIFICATION. Pressure differs by country and by season. Every comparison
 //      is made within one (place, month), and only within-stratum differences are
 //      pooled. A Slovak August is never compared against a British January.
-//   2. MULTIPLE COMPARISONS. Seven factors are tested at once, so one in twenty
-//      would look significant by chance. Benjamini-Hochberg q-values are reported,
-//      never raw p-values alone.
+//   2. MULTIPLE COMPARISONS. Every factor with data is tested at once, so one in
+//      twenty would look significant by chance. Benjamini-Hochberg q-values are
+//      reported, never raw p-values alone. A factor with no data yields no p-value
+//      and is excluded from the correction, so an empty column cannot dilute a
+//      real result simply by existing.
 //   3. POWER GATING. Below a floor of cases, controls and strata, nothing is
 //      reported at all.
 
@@ -31,6 +33,15 @@ export const FACTORS = [
   { key: "temp_max_c", label: "Maximum daily temperature (C)" },
   { key: "humidity_mean", label: "Mean relative humidity (%)" },
   { key: "daylight_hours", label: "Daylight hours" },
+  // On-device factors (F14). Present only once a Health Connect reader or a CSV
+  // export starts pushing them; until then every one reports "insufficient data"
+  // and is excluded from the multiple-comparison correction, so it cannot weaken
+  // the weather results by merely existing.
+  { key: "sleep_minutes", label: "Sleep the night before (minutes)" },
+  { key: "sleep_efficiency", label: "Sleep efficiency (asleep / in bed)" },
+  { key: "steps", label: "Steps" },
+  { key: "resting_hr", label: "Resting heart rate (bpm)" },
+  { key: "hrv_ms", label: "Heart-rate variability (ms)" },
 ] as const;
 
 type FactorKey = (typeof FACTORS)[number]["key"];
@@ -173,7 +184,7 @@ export async function triggerAnalysis(db: D1Database): Promise<TriggerAnalysis> 
 
   return {
     method:
-      "Case-control on calendar days. Each stratum is one (place, month); only within-stratum differences are pooled by inverse variance, so season and country cannot masquerade as a trigger. Benjamini-Hochberg q-values control the false discovery rate across the seven factors.",
+      "Case-control on calendar days. Each stratum is one (place, month); only within-stratum differences are pooled by inverse variance, so season and country cannot masquerade as a trigger. Benjamini-Hochberg q-values control the false discovery rate across every factor that has data.",
     excluded:
       "Days within 2 days of a location change, where the weather may belong to the wrong place.",
     thresholds: {

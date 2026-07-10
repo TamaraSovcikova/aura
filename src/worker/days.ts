@@ -12,6 +12,7 @@
 import type { Bindings } from "./db";
 import { nowIso } from "./db";
 import { aggregateDays, dateRange, type DayFactors } from "../shared/weather";
+import type { HealthDay } from "../shared/health";
 
 export interface LocationRow {
   from_date: string;
@@ -170,6 +171,60 @@ export async function backfillDays(
   }
 
   return { from, to, blocks: blocks.length, days_written: written, skipped_no_location: skipped };
+}
+
+// ── Health intake (F14) ──────────────────────────────────────────────────────
+
+/**
+ * Upsert on-device health factors onto `days`.
+ *
+ * Two invariants:
+ *   * It NEVER touches the weather columns. A health push and a weather backfill
+ *     write disjoint fields, so either can run at any time in any order.
+ *   * Fields are COALESCEd, not overwritten. A push carrying only `sleep_minutes`
+ *     must not wipe yesterday's `steps`; partial sources are the normal case.
+ *
+ * A day with no weather row is created here, so sleep can be recorded for a date
+ * the backfill has not reached. The weather columns stay null and are simply
+ * skipped by the factors that need them.
+ */
+export async function upsertHealthDays(
+  env: Bindings,
+  days: HealthDay[],
+  source: string
+): Promise<{ days_written: number }> {
+  const at = nowIso();
+  for (let i = 0; i < days.length; i += 50) {
+    const chunk = days.slice(i, i + 50);
+    await env.DB.batch(
+      chunk.map((d) =>
+        env.DB.prepare(
+          `INSERT INTO days (local_date, fetched_at, sleep_minutes, sleep_efficiency,
+                             steps, resting_hr, hrv_ms, health_source, health_fetched_at)
+           VALUES (?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(local_date) DO UPDATE SET
+             sleep_minutes     = COALESCE(excluded.sleep_minutes, days.sleep_minutes),
+             sleep_efficiency  = COALESCE(excluded.sleep_efficiency, days.sleep_efficiency),
+             steps             = COALESCE(excluded.steps, days.steps),
+             resting_hr        = COALESCE(excluded.resting_hr, days.resting_hr),
+             hrv_ms            = COALESCE(excluded.hrv_ms, days.hrv_ms),
+             health_source     = excluded.health_source,
+             health_fetched_at = excluded.health_fetched_at`
+        ).bind(
+          d.local_date,
+          at,
+          d.sleep_minutes ?? null,
+          d.sleep_efficiency ?? null,
+          d.steps ?? null,
+          d.resting_hr ?? null,
+          d.hrv_ms ?? null,
+          source,
+          at
+        )
+      )
+    );
+  }
+  return { days_written: days.length };
 }
 
 /** Nightly refresh: re-fetch the trailing window so recent days settle. */
