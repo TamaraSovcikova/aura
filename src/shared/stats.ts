@@ -186,3 +186,110 @@ export function stratifiedMeanDiff(strata: Stratum[]): StratifiedResult {
 
 export const round = (v: number | null, dp = 4): number | null =>
   v === null || !Number.isFinite(v) ? null : Number(v.toFixed(dp));
+
+/** A 2x2 table within one stratum. */
+export interface Table2x2 {
+  key: string;
+  /** exposed and had a headache */ a: number;
+  /** exposed, no headache */ b: number;
+  /** unexposed and had a headache */ c: number;
+  /** unexposed, no headache */ d: number;
+}
+
+export interface OddsRatioResult {
+  strata_used: number;
+  exposed_days: number;
+  unexposed_days: number;
+  exposed_headache_days: number;
+  unexposed_headache_days: number;
+  /** Ignores strata. Kept only to show what stratifying changed. */
+  crude_or: number | null;
+  /** Mantel-Haenszel pooled odds ratio. */
+  or: number | null;
+  ci_low: number | null;
+  ci_high: number | null;
+  p: number | null;
+}
+
+/**
+ * Mantel-Haenszel odds ratio with a Robins-Breslow-Greenland variance.
+ *
+ * A menstrual window is a BINARY exposure, not a quantity. Feeding it to a
+ * difference-in-means test would be meaningless. This compares the ODDS of a
+ * headache inside the window against outside it, pooled across strata so season
+ * and country cannot leak in, exactly as the continuous factors are.
+ *
+ * A stratum contributes only if it contains at least one exposed and one
+ * unexposed day; a table with an empty margin carries no information about the
+ * ratio and would only add noise.
+ */
+export function mantelHaenszelOR(tables: Table2x2[]): OddsRatioResult {
+  let sumR = 0;
+  let sumS = 0;
+  let vNum1 = 0;
+  let vNum2 = 0;
+  let vNum3 = 0;
+  let used = 0;
+
+  let A = 0;
+  let B = 0;
+  let C = 0;
+  let D = 0;
+
+  for (const t of tables) {
+    const n = t.a + t.b + t.c + t.d;
+    if (n === 0) continue;
+    A += t.a;
+    B += t.b;
+    C += t.c;
+    D += t.d;
+
+    const exposed = t.a + t.b;
+    const unexposed = t.c + t.d;
+    if (exposed === 0 || unexposed === 0) continue;
+
+    const R = (t.a * t.d) / n;
+    const S = (t.b * t.c) / n;
+    const P = (t.a + t.d) / n;
+    const Q = (t.b + t.c) / n;
+
+    sumR += R;
+    sumS += S;
+    vNum1 += P * R;
+    vNum2 += P * S + Q * R;
+    vNum3 += Q * S;
+    used++;
+  }
+
+  const crude = B * C > 0 ? (A * D) / (B * C) : null;
+
+  const base: OddsRatioResult = {
+    strata_used: used,
+    exposed_days: A + B,
+    unexposed_days: C + D,
+    exposed_headache_days: A,
+    unexposed_headache_days: C,
+    crude_or: crude,
+    or: null,
+    ci_low: null,
+    ci_high: null,
+    p: null,
+  };
+
+  if (used === 0 || sumR === 0 || sumS === 0) return base;
+
+  const or = sumR / sumS;
+  const varLn =
+    vNum1 / (2 * sumR * sumR) + vNum2 / (2 * sumR * sumS) + vNum3 / (2 * sumS * sumS);
+  if (!Number.isFinite(varLn) || varLn <= 0) return { ...base, or };
+
+  const se = Math.sqrt(varLn);
+  const lnOr = Math.log(or);
+  return {
+    ...base,
+    or,
+    ci_low: Math.exp(lnOr - 1.96 * se),
+    ci_high: Math.exp(lnOr + 1.96 * se),
+    p: twoSidedP(lnOr / se),
+  };
+}

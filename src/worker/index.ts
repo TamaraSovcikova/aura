@@ -6,6 +6,9 @@ import { premonitionStats } from "./stats";
 import { backfillDays, refreshRecentDays, upsertHealthDays } from "./days";
 import { aggregateSleepSessions, validateHealthDays } from "../shared/health";
 import { triggerAnalysis } from "./triggers";
+import { menstrualAnalysis } from "./cycle";
+import { buildSummary } from "./insights";
+import { doctorHtml, episodesCsv } from "./export";
 import { fetchEnrichment, roundCoord } from "./enrich";
 import type { Episode, StartBody, EndBody } from "../shared/types";
 
@@ -345,6 +348,70 @@ app.get("/api/days/health/coverage", async (c) => {
        FROM days`
   ).first();
   return c.json(row);
+});
+
+// --- Cycle (F13) -----------------------------------------------------------
+// One tap a month. cycle_day for every other day is DERIVED from these events,
+// never stored, so a forgotten period added later corrects the whole history.
+
+interface CycleBody {
+  local_date?: string;
+  note?: string;
+}
+
+app.post("/api/cycle", async (c) => {
+  const body = await c.req.json<CycleBody>().catch(() => ({}) as CycleBody);
+  const date = body.local_date;
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return c.json({ error: "local_date must be YYYY-MM-DD" }, 400);
+  }
+  const row = await c.env.DB.prepare(
+    `INSERT INTO cycle_events (local_date, kind, note, source)
+     VALUES (?, 'period_start', ?, 'app')
+     ON CONFLICT(local_date) DO UPDATE SET note = COALESCE(excluded.note, cycle_events.note)
+     RETURNING *`
+  )
+    .bind(date, body.note ?? null)
+    .first();
+  return c.json(row, 201);
+});
+
+app.get("/api/cycle", async (c) => {
+  const res = await c.env.DB.prepare(
+    `SELECT * FROM cycle_events ORDER BY local_date DESC LIMIT 60`
+  ).all();
+  return c.json(res.results);
+});
+
+app.delete("/api/cycle/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) return c.json({ error: "bad id" }, 400);
+  const row = await c.env.DB.prepare(`DELETE FROM cycle_events WHERE id = ? RETURNING id`)
+    .bind(id)
+    .first<{ id: number }>();
+  if (!row) return c.json({ error: "not found" }, 404);
+  return c.json({ ok: true });
+});
+
+app.get("/api/cycle/analysis", async (c) => c.json(await menstrualAnalysis(c.env.DB)));
+
+// --- Dashboard + export (F5 / F6 / F7 / F8) --------------------------------
+
+app.get("/api/summary", async (c) => c.json(await buildSummary(c.env.DB)));
+
+app.get("/api/export/episodes.csv", async (c) => {
+  const csv = await episodesCsv(c.env.DB);
+  return new Response(csv, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="aura-episodes.csv"',
+    },
+  });
+});
+
+app.get("/api/export/doctor", async (c) => {
+  const page = await doctorHtml(c.env.DB);
+  return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 });
 
 app.get("/api/triggers", async (c) => c.json(await triggerAnalysis(c.env.DB)));

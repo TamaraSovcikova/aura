@@ -53,3 +53,13 @@ export interface EndBody {
   /** Client-captured end time, used when syncing an offline log. */
   client_ended_at?: string;
 }
+
+/** A logged period start (F13). `cycle_day` is never stored: it is derived. */
+export interface CycleEvent {
+  id: number;
+  local_date: string;
+  kind: "period_start";
+  note: string | null;
+  source: string;
+  created_at: string;
+}

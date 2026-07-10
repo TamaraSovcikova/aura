@@ -1,4 +1,8 @@
-import type { Episode, StartBody, EndBody } from "../shared/types";
+import type { Episode, StartBody, EndBody, CycleEvent } from "../shared/types";
+// Type-only: erased at build, so no worker code reaches the bundle. Importing the
+// server's own return type means the client cannot drift from what /api/summary
+// actually sends.
+import type { Summary } from "../worker/insights";
 
 const PIN_KEY = "aura_pin";
 
@@ -90,6 +94,52 @@ export async function apiPremonitionCount(): Promise<number> {
   const list = await parse<unknown[]>(r, "premonitions");
   return list.length;
 }
+
+// --- Insights, cycle, export (F5 / F6 / F7 / F8 / F13) ---------------------
+
+export async function apiSummary(): Promise<Summary> {
+  const r = await fetch("/api/summary", { headers: authHeaders() });
+  return parse<Summary>(r, "summary");
+}
+
+export async function apiCycleList(): Promise<CycleEvent[]> {
+  const r = await fetch("/api/cycle", { headers: authHeaders() });
+  return parse<CycleEvent[]>(r, "cycle");
+}
+
+export async function apiLogPeriod(localDate: string): Promise<CycleEvent> {
+  const r = await fetch("/api/cycle", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ local_date: localDate }),
+  });
+  return parse<CycleEvent>(r, "log period");
+}
+
+export async function apiCycleDelete(id: number): Promise<void> {
+  const r = await fetch(`/api/cycle/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (r.status === 401) throw new UnauthorizedError();
+  if (!r.ok && r.status !== 404) throw new Error(`delete failed: ${r.status}`);
+}
+
+/**
+ * The exports are PIN-guarded GETs, so a plain <a href> would not carry the
+ * Authorization header. Passing the PIN as a query parameter instead would leak
+ * it into browser history, referrers and every proxy log in between. Fetch with
+ * the header and hand the browser a blob it already holds.
+ */
+async function fetchBlob(path: string, mime: string): Promise<string> {
+  const r = await fetch(path, { headers: { Authorization: `Bearer ${getPin()}` } });
+  if (r.status === 401) throw new UnauthorizedError();
+  if (!r.ok) throw new Error(`export failed: ${r.status}`);
+  return URL.createObjectURL(new Blob([await r.text()], { type: mime }));
+}
+
+export const exportCsvUrl = () => fetchBlob("/api/export/episodes.csv", "text/csv");
+export const exportDoctorUrl = () => fetchBlob("/api/export/doctor", "text/html");
 
 export async function apiDelete(id: number): Promise<void> {
   const r = await fetch(`/api/episodes/${id}`, {

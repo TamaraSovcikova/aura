@@ -179,7 +179,20 @@ export async function monthlyHeadacheDays(
  * would be a plausible, confident, wrong answer to the question she cares about
  * most, so partial months are excluded rather than explained away.
  */
-export function headacheDaysTrend(series: MonthPoint[]) {
+export type TrendResult =
+  | { enough_data: false; complete_months: number; note: string }
+  | {
+      enough_data: true;
+      excluded_partial_months: string[];
+      recent_3_months: string[];
+      prior_3_months: string[];
+      recent_mean_headache_days: number;
+      prior_mean_headache_days: number;
+      percent_change: number | null;
+      meets_50pct_reduction: boolean;
+    };
+
+export function headacheDaysTrend(series: MonthPoint[]): TrendResult {
   const complete = series.filter((m) => m.complete);
   if (complete.length < 6) {
     return {

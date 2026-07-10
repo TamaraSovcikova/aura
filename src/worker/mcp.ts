@@ -19,6 +19,8 @@ import {
   premonitionStats,
 } from "./stats";
 import { beliefVsData, premonitionConversion, triggerAnalysis } from "./triggers";
+import { menstrualAnalysis } from "./cycle";
+import { buildSummary } from "./insights";
 
 export const mcp = new Hono<{ Bindings: Bindings }>();
 
@@ -151,6 +153,31 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: { window_hours: { type: "number", description: "Default 24, max 72." } },
+    },
+  },
+  {
+    name: "summary",
+    description:
+      "The dashboard in one call: monthly headache days (with `complete` flags), the quarter-on-quarter trend, severity distribution, acute-medication days per month with the ICHD-3 day counts, control-day coverage, and the deterministic insight cards. Each card carries `kind`: 'fact' is a count, 'gated' depends on a statistical test that reports its own power.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "menstrual_analysis",
+    description:
+      "Do headache odds differ in the perimenstrual window (day -2 to +3 around a period start)? A binary exposure, so it uses a Mantel-Haenszel odds ratio stratified by (place, month), not a difference in means. " +
+      "Days whose cycle day cannot be known are excluded, never assumed. There is NO cycle data in her history, so until she has logged period starts for several months this returns 'insufficient data'. Read the `verdict`.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "log_period_start",
+    description:
+      "Record that the user's period started on a given day (defaults to today). One tap a month; the cycle day of every other day is derived from these. Use only when she says it started; never infer it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        local_date: { type: "string", description: "YYYY-MM-DD, defaults to today in Europe/Berlin" },
+        note: { type: "string" },
+      },
     },
   },
   {
@@ -343,6 +370,27 @@ async function handleTool(
       const raw = Number(args.window_hours ?? 24);
       const w = Math.min(Math.max(Number.isFinite(raw) ? raw : 24, 1), 72);
       return json(await premonitionConversion(db, w));
+    }
+
+    case "summary":
+      return json(await buildSummary(db));
+
+    case "menstrual_analysis":
+      return json(await menstrualAnalysis(db));
+
+    case "log_period_start": {
+      const date = (args.local_date as string | undefined) ?? localDate(nowIso(), "Europe/Berlin");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("local_date must be YYYY-MM-DD");
+      const row = await db
+        .prepare(
+          `INSERT INTO cycle_events (local_date, kind, note, source)
+           VALUES (?, 'period_start', ?, 'mcp')
+           ON CONFLICT(local_date) DO UPDATE SET note = COALESCE(excluded.note, cycle_events.note)
+           RETURNING *`
+        )
+        .bind(date, (args.note as string | undefined) ?? null)
+        .first();
+      return json({ logged: row });
     }
 
     case "log_premonition": {

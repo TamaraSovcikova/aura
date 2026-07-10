@@ -29,6 +29,7 @@ import {
   type StartFn,
 } from "./outbox";
 import { currentTz, getCoords } from "./geo";
+import Insights from "./Insights";
 import { appendTranscript, listen, supportsVoice } from "./voice";
 import {
   loadPremOutbox,
@@ -70,8 +71,11 @@ function pendingCount(list: LocalEpisode[]): number {
     .length;
 }
 
+type Tab = "today" | "insights";
+
 export default function App() {
   const [pinReady, setPinReady] = useState(hasPin());
+  const [tab, setTab] = useState<Tab>("today");
   const [open, setOpen] = useState<LocalEpisode | null>(null);
   const [nowTs, setNowTs] = useState(Date.now());
   const [recent, setRecent] = useState<Episode[]>([]);
@@ -337,8 +341,21 @@ export default function App() {
     ? formatDuration(nowTs - new Date(open.started_at).getTime())
     : "";
 
+  if (tab === "insights") {
+    return (
+      <div className="mx-auto flex min-h-full max-w-md flex-col px-6 pb-28 pt-8">
+        <header className="mb-8 flex items-center justify-between">
+          <h1 className="text-lg font-semibold tracking-tight text-slate-200">Aura</h1>
+          <StatusPill online={online} pending={pending} />
+        </header>
+        <Insights onUnauthorized={() => setPinReady(false)} />
+        <TabBar tab={tab} onChange={setTab} />
+      </div>
+    );
+  }
+
   return (
-    <div className="mx-auto flex min-h-full max-w-md flex-col px-6 pb-10 pt-8">
+    <div className="mx-auto flex min-h-full max-w-md flex-col px-6 pb-28 pt-8">
       <header className="mb-8 flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight text-slate-200">
           Aura
@@ -410,7 +427,32 @@ export default function App() {
           onCancel={() => setEditing(null)}
         />
       )}
+
+      <TabBar tab={tab} onChange={setTab} />
     </div>
+  );
+}
+
+/** Two tabs, no more. Capture stays one tap from anywhere; everything derived
+ *  lives behind the second, where it cannot compete with the button. */
+function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
+  const item = (id: Tab, label: string) => (
+    <button
+      onClick={() => onChange(id)}
+      className={`flex-1 rounded-lg py-2.5 text-sm transition ${
+        tab === id ? "bg-slate-800 text-slate-100" : "text-slate-500"
+      }`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-800 bg-slate-950/90 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+      <div className="mx-auto flex max-w-md gap-2 px-6 py-2">
+        {item("today", "Today")}
+        {item("insights", "Insights")}
+      </div>
+    </nav>
   );
 }
 
