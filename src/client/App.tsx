@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Episode } from "../shared/types";
 import { durationMs, formatDuration } from "../shared/format";
 import {
@@ -23,7 +23,7 @@ import {
   type StartFn,
 } from "./outbox";
 import { currentTz, getCoords } from "./geo";
-import { listen, supportsVoice } from "./voice";
+import { appendTranscript, listen, supportsVoice } from "./voice";
 
 const startFn: StartFn = async (e) => {
   const ep = await apiStart({
@@ -457,15 +457,7 @@ function EditPanel({
           className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
         />
 
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
-          Note
-        </p>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          rows={2}
-          className="w-full resize-none rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
-        />
+        <VoiceNoteField value={note} onChange={setNote} />
 
         {confirmDelete ? (
           <div className="mt-6 rounded-lg bg-rose-950/40 p-3">
@@ -512,6 +504,73 @@ function EditPanel({
   );
 }
 
+/**
+ * Note field with dictation. A recording APPENDS to whatever is already in the
+ * note (captured when recording starts) and rides through long pauses; tap again
+ * to stop.
+ */
+function VoiceNoteField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [listening, setListening] = useState(false);
+  const stopRef = useRef<(() => void) | null>(null);
+
+  // Never leave the mic running if the panel closes mid-recording.
+  useEffect(() => () => stopRef.current?.(), []);
+
+  const toggle = () => {
+    if (listening) {
+      stopRef.current?.();
+      return;
+    }
+    const base = value; // freeze what's already typed/dictated
+    setListening(true);
+    stopRef.current = listen(
+      (sessionText) => onChange(appendTranscript(base, sessionText)),
+      () => {
+        setListening(false);
+        stopRef.current = null;
+      }
+    );
+  };
+
+  return (
+    <>
+      <div className="mt-4 mb-2 flex items-center justify-between">
+        <p className="text-xs uppercase tracking-wide text-slate-500">Note</p>
+        {supportsVoice() && (
+          <button
+            onClick={toggle}
+            className={`rounded-full px-3 py-1 text-xs transition ${
+              listening
+                ? "bg-rose-500 text-white"
+                : "bg-slate-800 text-slate-300"
+            }`}
+          >
+            {listening ? "● Listening, tap to stop" : "🎤 Voice"}
+          </button>
+        )}
+      </div>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={3}
+        placeholder="woke up with it, behind left eye…"
+        className="w-full resize-none rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
+      />
+      {listening && (
+        <p className="mt-1 text-xs text-slate-500">
+          Take your time. Pauses are fine.
+        </p>
+      )}
+    </>
+  );
+}
+
 function EndPanel({
   onSave,
   onSkip,
@@ -522,16 +581,6 @@ function EndPanel({
   const [severity, setSeverity] = useState<number | null>(null);
   const [meds, setMeds] = useState("");
   const [note, setNote] = useState("");
-  const [listening, setListening] = useState(false);
-
-  const toggleVoice = () => {
-    if (listening) return;
-    setListening(true);
-    listen(
-      (text) => setNote(text),
-      () => setListening(false)
-    );
-  };
 
   const levels: Array<{ v: number; label: string }> = [
     { v: 1, label: "Mild" },
@@ -575,28 +624,7 @@ function EndPanel({
           className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
         />
 
-        <div className="mt-4 mb-2 flex items-center justify-between">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Note</p>
-          {supportsVoice() && (
-            <button
-              onClick={toggleVoice}
-              className={`rounded-full px-3 py-1 text-xs ${
-                listening
-                  ? "bg-rose-500 text-white"
-                  : "bg-slate-800 text-slate-300"
-              }`}
-            >
-              {listening ? "Listening…" : "🎤 Voice"}
-            </button>
-          )}
-        </div>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          rows={2}
-          placeholder="woke up with it, behind left eye…"
-          className="w-full resize-none rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
-        />
+        <VoiceNoteField value={note} onChange={setNote} />
 
         <div className="mt-6 flex gap-3">
           <button

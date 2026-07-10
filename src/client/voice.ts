@@ -1,19 +1,46 @@
 // Thin wrapper over the Web Speech API (Chrome on Android supports it).
 // Degrades gracefully: if unsupported, `supportsVoice()` is false and the UI
 // falls back to the plain text field.
+//
+// Two behaviours matter for someone dictating mid-migraine:
+//  1. Long pauses must NOT end the note. Chrome ends a recognition run after a
+//     short silence, so we run `continuous` and restart on `onend`, carrying the
+//     finalized text forward. Only an explicit stop, a fatal error, or the
+//     session cap ends it.
+//  2. A recording appends to whatever is already in the note (see
+//     `appendTranscript`); it never replaces it.
+
+interface SpeechRecognitionResultLike extends ArrayLike<{ transcript: string }> {
+  isFinal: boolean;
+}
+
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
 
 interface SpeechRecognitionLike {
   lang: string;
   interimResults: boolean;
   continuous: boolean;
-  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
-  onerror: ((e: unknown) => void) | null;
+  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
   onend: (() => void) | null;
   start(): void;
   stop(): void;
 }
 
+// Errors that mean "give up"; `no-speech` and `aborted` are normal during a pause.
+const FATAL_ERRORS = new Set([
+  "not-allowed",
+  "service-not-allowed",
+  "audio-capture",
+]);
+
+// Safety net so a forgotten recording can't listen forever.
+const MAX_SESSION_MS = 5 * 60 * 1000;
+
 function getCtor(): (new () => SpeechRecognitionLike) | null {
+  if (typeof window === "undefined") return null;
   const w = window as unknown as {
     SpeechRecognition?: new () => SpeechRecognitionLike;
     webkitSpeechRecognition?: new () => SpeechRecognitionLike;
@@ -22,15 +49,25 @@ function getCtor(): (new () => SpeechRecognitionLike) | null {
 }
 
 export function supportsVoice(): boolean {
-  return typeof window !== "undefined" && getCtor() !== null;
+  return getCtor() !== null;
+}
+
+/** Join two chunks of text with a single space, tolerating blanks either side. */
+export function appendTranscript(base: string, addition: string): string {
+  const b = base.trim();
+  const a = addition.trim();
+  if (!b) return a;
+  if (!a) return b;
+  return `${b} ${a}`;
 }
 
 /**
- * Start listening. Calls `onText` with the best transcript as it comes in.
- * Returns a stop function. Errors are swallowed to `onDone`.
+ * Start listening. `onText` receives the transcript of THIS session as it grows
+ * (the caller is responsible for appending it to any pre-existing note).
+ * Returns a stop function; `onDone` fires once listening has truly finished.
  */
 export function listen(
-  onText: (text: string) => void,
+  onText: (sessionText: string) => void,
   onDone: () => void
 ): () => void {
   const Ctor = getCtor();
@@ -38,29 +75,69 @@ export function listen(
     onDone();
     return () => {};
   }
-  const rec = new Ctor();
-  rec.lang = navigator.language || "en-US";
-  rec.interimResults = true;
-  rec.continuous = false;
-  rec.onresult = (e) => {
-    let text = "";
-    for (let i = 0; i < e.results.length; i++) {
-      text += e.results[i][0].transcript;
-    }
-    onText(text.trim());
-  };
-  rec.onerror = () => {};
-  rec.onend = () => onDone();
-  try {
-    rec.start();
-  } catch {
-    onDone();
-  }
-  return () => {
+
+  let stopped = false;
+  let committed = ""; // finalized text carried across restarts
+  let current: SpeechRecognitionLike | null = null;
+  const startedAt = Date.now();
+
+  const startInstance = () => {
+    let instanceFinal = "";
+    const rec = new Ctor();
+    current = rec;
+    rec.lang = navigator.language || "en-US";
+    rec.interimResults = true;
+    rec.continuous = true; // ride through pauses
+
+    rec.onresult = (e) => {
+      let finalText = "";
+      let interim = "";
+      for (let i = 0; i < e.results.length; i++) {
+        const res = e.results[i];
+        const t = res[0]?.transcript ?? "";
+        if (res.isFinal) finalText = appendTranscript(finalText, t);
+        else interim = appendTranscript(interim, t);
+      }
+      instanceFinal = finalText;
+      onText(appendTranscript(committed, appendTranscript(finalText, interim)));
+    };
+
+    rec.onerror = (e) => {
+      if (e?.error && FATAL_ERRORS.has(e.error)) stopped = true;
+      // no-speech / aborted are expected during a long pause: let onend restart.
+    };
+
+    rec.onend = () => {
+      committed = appendTranscript(committed, instanceFinal);
+      const expired = Date.now() - startedAt > MAX_SESSION_MS;
+      if (stopped || expired) {
+        onText(committed);
+        onDone();
+        return;
+      }
+      try {
+        startInstance(); // a pause ended the run, not the user
+      } catch {
+        onText(committed);
+        onDone();
+      }
+    };
+
     try {
-      rec.stop();
+      rec.start();
     } catch {
-      /* noop */
+      onDone();
+    }
+  };
+
+  startInstance();
+
+  return () => {
+    stopped = true;
+    try {
+      current?.stop();
+    } catch {
+      onDone();
     }
   };
 }
