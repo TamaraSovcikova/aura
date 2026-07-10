@@ -4,36 +4,9 @@
 // Guiding rule (from the feature map): the old marking must not contaminate the
 // new system. Nothing is inferred. Ambiguous data becomes "unknown", never a guess.
 
-/**
- * Where the user was on a given date. Barometric pressure is a synoptic-scale field,
- * so one point per country/region is plenty; the country is what matters.
- * Mirrors the location timeline in docs FEATURE-MAP.md and is superseded by the
- * `locations` table when F3 lands.
- */
-const TIMELINE = [
-  { from: "2024-08-26", to: "2024-08-31", place: "Vienna, AT", tz: "Europe/Vienna", lat: 48.21, lon: 16.37 },
-  { from: "2024-09-01", to: "2025-06-30", place: "London, UK",         tz: "Europe/London",     lat: 51.51, lon: -0.13 },
-  { from: "2025-07-01", to: "2025-08-31", place: "Vienna, AT", tz: "Europe/Vienna", lat: 48.21, lon: 16.37 },
-  { from: "2025-09-01", to: "2026-06-30", place: "London, UK",         tz: "Europe/London",     lat: 51.51, lon: -0.13 },
-  { from: "2026-07-01", to: "2099-12-31", place: "Berlin, DE",          tz: "Europe/Berlin",   lat: 52.52, lon: 13.40 },
-];
+import { locationForDate, daysBetween } from "./timeline.mjs";
 
-/** Days either side of a timeline boundary, flagged because a front may have passed. */
-const BOUNDARY_FLAG_DAYS = 2;
-
-export function locationForDate(isoDate) {
-  const hit = TIMELINE.find((r) => isoDate >= r.from && isoDate <= r.to);
-  if (!hit) return null;
-  const nearBoundary = TIMELINE.some((r) =>
-    Math.abs(daysBetween(isoDate, r.from)) <= BOUNDARY_FLAG_DAYS ||
-    Math.abs(daysBetween(isoDate, r.to)) <= BOUNDARY_FLAG_DAYS
-  );
-  return { ...hit, nearBoundary };
-}
-
-export function daysBetween(a, b) {
-  return Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000);
-}
+export { locationForDate, daysBetween };
 
 /**
  * Parse a freeform onset string into { hour, minute } or null when ambiguous.

@@ -43,7 +43,8 @@ function authorized(env: Bindings, header?: string, queryToken?: string): boolea
 const DATA_CAVEATS = [
   "Episodes before 2026-07-04 were imported from an Obsidian diary: they have no end time (so no duration), and some have no reliable start time (anchored at local noon).",
   "These are Monthly HEADACHE Days (MHD), not Monthly MIGRAINE Days (MMD). ICHD-3 criteria cannot be checked retroactively, so no imported attack is classified as migraine.",
-  "Weather and barometric pressure are mostly NULL until the historical backfill lands. Do not draw weather conclusions yet.",
+  "Weather does NOT live on the episode: the per-episode pressure columns are mostly NULL because geolocation was rarely granted. Day-level weather lives in the `days` table, keyed on local_date and the location timeline, and covers every day whether or not she had a headache.",
+  "The trigger analysis is not built yet. Do not compare headache days against control days by hand and present the result as a finding: it would be unadjusted, unweighted, and untested.",
   "Aura records and counts. It never diagnoses and never recommends treatment.",
 ].join(" ");
 

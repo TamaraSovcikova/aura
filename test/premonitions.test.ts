@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import app from "../src/worker/index";
+import { app } from "../src/worker/index";
 import { freshDb, TestD1 } from "./d1-adapter";
 import {
   reconcilePremonitions,

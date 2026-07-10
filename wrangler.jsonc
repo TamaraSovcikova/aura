@@ -13,6 +13,8 @@
     "run_worker_first": ["/api/*", "/mcp", "/mcp/*"]
   },
   "observability": { "enabled": true },
+  // Nightly refresh of the trailing control days (weather never depends on the phone).
+  "triggers": { "crons": ["0 3 * * *"] },
   // Create with: wrangler d1 create aura  (then paste database_id here).
   // Local dev + migrate:local + tests do not need a real id.
   "d1_databases": [

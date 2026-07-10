@@ -3,6 +3,7 @@ import type { Bindings } from "./db";
 import { localDate, nowIso, upsertPeakSample, validSeverity } from "./db";
 import { mcp } from "./mcp";
 import { premonitionStats } from "./stats";
+import { backfillDays, refreshRecentDays } from "./days";
 import { fetchEnrichment, roundCoord } from "./enrich";
 import type { Episode, StartBody, EndBody } from "../shared/types";
 
@@ -257,6 +258,44 @@ app.delete("/api/episodes/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// --- Day factors (control days) --------------------------------------------
+
+// Fetch and upsert weather for a date range. Idempotent; touches no episode.
+// Chunk long ranges from the caller so a single request stays inside limits.
+interface BackfillBody {
+  from?: string;
+  to?: string;
+}
+
+app.post("/api/days/backfill", async (c) => {
+  const body = await c.req.json<BackfillBody>().catch(() => ({}) as BackfillBody);
+  const isDate = (v: unknown): v is string =>
+    typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  if (!isDate(body.from) || !isDate(body.to)) {
+    return c.json({ error: "from and to must be YYYY-MM-DD" }, 400);
+  }
+  if (body.from > body.to) return c.json({ error: "from must be <= to" }, 400);
+  try {
+    return c.json(await backfillDays(c.env, body.from, body.to));
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : "backfill failed" }, 502);
+  }
+});
+
+app.get("/api/days", async (c) => {
+  const from = c.req.query("from");
+  const to = c.req.query("to");
+  const where: string[] = [];
+  const binds: unknown[] = [];
+  if (from) { where.push("local_date >= ?"); binds.push(from); }
+  if (to) { where.push("local_date <= ?"); binds.push(to); }
+  const res = await c.env.DB.prepare(
+    `SELECT * FROM days ${where.length ? "WHERE " + where.join(" AND ") : ""}
+      ORDER BY local_date DESC LIMIT 400`
+  ).bind(...binds).all();
+  return c.json(res.results);
+});
+
 // --- MCP server ------------------------------------------------------------
 // Mounted before the SPA fallback so /mcp is never swallowed by index.html.
 app.route("/mcp", mcp);
@@ -264,4 +303,14 @@ app.route("/mcp", mcp);
 // --- Static SPA fallback ---------------------------------------------------
 app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
-export default app;
+// Named export so tests can drive routes directly via app.request().
+export { app };
+
+export default {
+  fetch: app.fetch,
+  // Nightly: keep the trailing window of control days current, so weather never
+  // depends on a device granting geolocation.
+  async scheduled(_event: ScheduledController, env: Bindings, ctx: ExecutionContext) {
+    ctx.waitUntil(refreshRecentDays(env, 7).then(() => undefined));
+  },
+};
