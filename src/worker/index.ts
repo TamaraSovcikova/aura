@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Bindings } from "./db";
-import { nowIso } from "./db";
+import { localDate, nowIso, upsertPeakSample, validSeverity } from "./db";
 import { fetchEnrichment, roundCoord } from "./enrich";
 import type { Episode, StartBody, EndBody } from "../shared/types";
 
@@ -34,11 +34,21 @@ app.post("/api/episodes/start", async (c) => {
 
   const row = await c.env.DB.prepare(
     `INSERT INTO episodes
-       (started_at, tz, lat, lon, weather_code, pressure_hpa, temp_c)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+       (started_at, local_date, started_at_time_known, tz, lat, lon,
+        weather_code, pressure_hpa, temp_c, source)
+     VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, 'app')
      RETURNING *`
   )
-    .bind(startedAt, tz, lat, lon, enr.weather_code, enr.pressure_hpa, enr.temp_c)
+    .bind(
+      startedAt,
+      localDate(startedAt, tz),
+      tz,
+      lat,
+      lon,
+      enr.weather_code,
+      enr.pressure_hpa,
+      enr.temp_c
+    )
     .first<Episode>();
 
   return c.json(row, 201);
@@ -51,6 +61,12 @@ app.post("/api/episodes/:id/end", async (c) => {
   const body = await c.req.json<EndBody>().catch(() => ({}) as EndBody);
   const endedAt = body.client_ended_at ?? nowIso();
 
+  // Severity is a 0-10 VAS. Reject anything else rather than storing a bad scale.
+  if (body.severity !== undefined && body.severity !== null && validSeverity(body.severity) === null) {
+    return c.json({ error: "severity must be an integer 0-10" }, 400);
+  }
+  const severity = validSeverity(body.severity);
+
   const row = await c.env.DB.prepare(
     `UPDATE episodes
         SET ended_at = ?,
@@ -61,24 +77,24 @@ app.post("/api/episodes/:id/end", async (c) => {
       WHERE id = ?
       RETURNING *`
   )
-    .bind(
-      endedAt,
-      body.severity ?? null,
-      body.meds ?? null,
-      body.note ?? null,
-      nowIso(),
-      id
-    )
+    .bind(endedAt, severity, body.meds ?? null, body.note ?? null, nowIso(), id)
     .first<Episode>();
 
   if (!row) return c.json({ error: "not found" }, 404);
+  if (severity !== null) await upsertPeakSample(c.env.DB, id, severity, endedAt);
   return c.json(row);
 });
 
 // The currently-open episode (if any), so the UI knows to show "end".
+//
+// Only app-captured episodes can be open. Imported history has no end time, but
+// that means "duration unknown", not "still happening" -- without this guard a
+// migraine from 2024 would surface as the attack currently in progress.
 app.get("/api/episodes/current", async (c) => {
   const row = await c.env.DB.prepare(
-    `SELECT * FROM episodes WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1`
+    `SELECT * FROM episodes
+      WHERE ended_at IS NULL AND source = 'app'
+      ORDER BY started_at DESC LIMIT 1`
   ).first<Episode>();
   return c.json(row ?? null);
 });
@@ -102,6 +118,10 @@ app.patch("/api/episodes/:id", async (c) => {
   const body = await c.req
     .json<Partial<Episode>>()
     .catch(() => ({}) as Partial<Episode>);
+
+  if (body.severity !== undefined && body.severity !== null && validSeverity(body.severity) === null) {
+    return c.json({ error: "severity must be an integer 0-10" }, 400);
+  }
 
   const editable = [
     "started_at",
@@ -130,6 +150,11 @@ app.patch("/api/episodes/:id", async (c) => {
     .first<Episode>();
 
   if (!row) return c.json({ error: "not found" }, 404);
+
+  const severity = validSeverity(body.severity);
+  if (severity !== null) {
+    await upsertPeakSample(c.env.DB, id, severity, row.ended_at ?? nowIso());
+  }
   return c.json(row);
 });
 

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Episode } from "../shared/types";
+import {
+  SEVERITY_MAX,
+  SEVERITY_MIN,
+  SEVERITY_QUICK,
+  type Episode,
+} from "../shared/types";
 import { durationMs, formatDuration } from "../shared/format";
 import {
   apiCurrent,
@@ -368,16 +373,18 @@ function RecentList({
                   hour: "2-digit",
                   minute: "2-digit",
                 })}
-                {e.severity ? (
-                  <span className="ml-2 text-slate-500">
-                    {"·".repeat(e.severity)}
+                {e.severity !== null ? (
+                  <span className="ml-2 text-slate-500 tabular-nums">
+                    {e.severity}/{SEVERITY_MAX}
                   </span>
                 ) : null}
               </span>
               <span className="text-slate-400 tabular-nums">
                 {e.ended_at
                   ? formatDuration(durationMs(e.started_at, e.ended_at))
-                  : "ongoing"}
+                  : e.source === "app"
+                    ? "ongoing"
+                    : "—" /* imported: duration unknown, not in progress */}
               </span>
             </button>
           </li>
@@ -406,11 +413,6 @@ function EditPanel({
   const [note, setNote] = useState(episode.note ?? "");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const levels: Array<{ v: number; label: string }> = [
-    { v: 1, label: "Mild" },
-    { v: 2, label: "Moderate" },
-    { v: 3, label: "Severe" },
-  ];
 
   const when = new Date(episode.started_at).toLocaleString([], {
     weekday: "short",
@@ -428,24 +430,37 @@ function EditPanel({
           <span className="text-xs text-slate-500">{when}</span>
         </div>
 
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
-          Severity
-        </p>
-        <div className="flex gap-2">
-          {levels.map((l) => (
-            <button
-              key={l.v}
-              onClick={() => setSeverity(severity === l.v ? null : l.v)}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm transition ${
-                severity === l.v
-                  ? "bg-indigo-500 text-white"
-                  : "bg-slate-800 text-slate-300"
-              }`}
-            >
-              {l.label}
-            </button>
-          ))}
+        {/* Editing happens after the fact, so precision is affordable here. */}
+        <div className="mt-4 mb-2 flex items-baseline justify-between">
+          <p className="text-xs uppercase tracking-wide text-slate-500">
+            Peak severity
+          </p>
+          <span className="text-sm tabular-nums text-slate-300">
+            {severity === null ? "not set" : `${severity}/${SEVERITY_MAX}`}
+          </span>
         </div>
+        <input
+          type="range"
+          min={SEVERITY_MIN}
+          max={SEVERITY_MAX}
+          step={1}
+          value={severity ?? 0}
+          onChange={(e) => setSeverity(Number(e.target.value))}
+          className="w-full accent-indigo-500"
+        />
+        <div className="flex justify-between text-[10px] text-slate-600">
+          <span>0</span>
+          <span>5</span>
+          <span>10</span>
+        </div>
+        {severity !== null && (
+          <button
+            onClick={() => setSeverity(null)}
+            className="mt-1 text-xs text-slate-500 underline"
+          >
+            clear severity
+          </button>
+        )}
 
         <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
           Meds taken
@@ -582,11 +597,7 @@ function EndPanel({
   const [meds, setMeds] = useState("");
   const [note, setNote] = useState("");
 
-  const levels: Array<{ v: number; label: string }> = [
-    { v: 1, label: "Mild" },
-    { v: 2, label: "Moderate" },
-    { v: 3, label: "Severe" },
-  ];
+  const levels = SEVERITY_QUICK;
 
   return (
     <div className="fixed inset-0 z-10 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6">
@@ -601,10 +612,10 @@ function EndPanel({
         <div className="flex gap-2">
           {levels.map((l) => (
             <button
-              key={l.v}
-              onClick={() => setSeverity(severity === l.v ? null : l.v)}
+              key={l.level}
+              onClick={() => setSeverity(severity === l.level ? null : l.level)}
               className={`flex-1 rounded-lg px-3 py-2 text-sm transition ${
-                severity === l.v
+                severity === l.level
                   ? "bg-indigo-500 text-white"
                   : "bg-slate-800 text-slate-300"
               }`}

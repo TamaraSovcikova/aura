@@ -6,6 +6,12 @@
 *_PRIVATE.md
 *credentials*
 
+# Personal health data: generated import SQL + any exported episode data.
+# The CSV lives in the Obsidian vault; the DB holds the data. Never commit either.
+tmp/
+*.import.sql
+Migraines_AllEpisodes.csv
+
 # Build artifacts
 node_modules/
 dist/

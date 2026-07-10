@@ -189,6 +189,123 @@ describe("episodes API", () => {
     expect(del2.status).toBe(404);
   });
 
+  it("stores severity on the 0-10 scale and records a peak sample", async () => {
+    const s = await app.request(
+      "/api/episodes/start",
+      { method: "POST", headers: authed, body: JSON.stringify({ tz: "Europe/London" }) },
+      env(d1)
+    );
+    const { id } = (await s.json()) as { id: number };
+
+    const e = await app.request(
+      `/api/episodes/${id}/end`,
+      { method: "POST", headers: authed, body: JSON.stringify({ severity: 7 }) },
+      env(d1)
+    );
+    expect(e.status).toBe(200);
+    expect(((await e.json()) as { severity: number }).severity).toBe(7);
+
+    const samples = await d1
+      .prepare(`SELECT level, kind FROM severity_samples WHERE episode_id = ?`)
+      .bind(id)
+      .all<{ level: number; kind: string }>();
+    expect(samples.results).toEqual([{ level: 7, kind: "peak" }]);
+  });
+
+  it("rejects an off-scale severity rather than corrupting the scale", async () => {
+    const s = await app.request(
+      "/api/episodes/start",
+      { method: "POST", headers: authed, body: JSON.stringify({}) },
+      env(d1)
+    );
+    const { id } = (await s.json()) as { id: number };
+
+    for (const bad of [11, -1, 2.5]) {
+      const r = await app.request(
+        `/api/episodes/${id}/end`,
+        { method: "POST", headers: authed, body: JSON.stringify({ severity: bad }) },
+        env(d1)
+      );
+      expect(r.status).toBe(400);
+    }
+  });
+
+  it("re-editing severity replaces the peak sample instead of stacking", async () => {
+    const s = await app.request(
+      "/api/episodes/start",
+      { method: "POST", headers: authed, body: JSON.stringify({}) },
+      env(d1)
+    );
+    const { id } = (await s.json()) as { id: number };
+
+    await app.request(
+      `/api/episodes/${id}/end`,
+      { method: "POST", headers: authed, body: JSON.stringify({ severity: 6 }) },
+      env(d1)
+    );
+    await app.request(
+      `/api/episodes/${id}`,
+      { method: "PATCH", headers: authed, body: JSON.stringify({ severity: 9 }) },
+      env(d1)
+    );
+
+    const samples = await d1
+      .prepare(`SELECT level FROM severity_samples WHERE episode_id = ? AND kind = 'peak'`)
+      .bind(id)
+      .all<{ level: number }>();
+    expect(samples.results).toEqual([{ level: 9 }]);
+  });
+
+  it("sets local_date from the timezone, not the UTC date", async () => {
+    // 23:30 BST on 2025-06-15 is 22:30 UTC the same day; the local day must win.
+    const s = await app.request(
+      "/api/episodes/start",
+      {
+        method: "POST",
+        headers: authed,
+        body: JSON.stringify({
+          client_started_at: "2025-06-15T23:30:00.000Z", // 00:30 on the 16th in London
+          tz: "Europe/London",
+        }),
+      },
+      env(d1)
+    );
+    const row = (await s.json()) as { local_date: string };
+    expect(row.local_date).toBe("2025-06-16");
+  });
+
+  it("never treats an imported episode as the currently-open attack", async () => {
+    // Imported history has no ended_at, but that means "duration unknown", not
+    // "in progress". Without the source guard a 2024 migraine surfaces as open.
+    await d1
+      .prepare(
+        `INSERT INTO episodes (started_at, local_date, ended_at, source, source_file)
+         VALUES ('2024-08-26T10:00:00.000Z', '2024-08-26', NULL, 'obsidian-import', '2024-08-26_Migraine.md')`
+      )
+      .run();
+
+    const res = await app.request(
+      "/api/episodes/current",
+      { headers: authed },
+      env(d1)
+    );
+    expect(await res.json()).toBeNull();
+
+    // An app-captured unended episode still is open.
+    await app.request(
+      "/api/episodes/start",
+      { method: "POST", headers: authed, body: JSON.stringify({}) },
+      env(d1)
+    );
+    const res2 = await app.request(
+      "/api/episodes/current",
+      { headers: authed },
+      env(d1)
+    );
+    const cur = (await res2.json()) as { source: string } | null;
+    expect(cur?.source).toBe("app");
+  });
+
   it("rejects an API call without a valid PIN", async () => {
     const res = await app.request(
       "/api/episodes/current",
