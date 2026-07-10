@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { Bindings } from "./db";
 import { localDate, nowIso, upsertPeakSample, validSeverity } from "./db";
+import { mcp } from "./mcp";
+import { premonitionStats } from "./stats";
 import { fetchEnrichment, roundCoord } from "./enrich";
 import type { Episode, StartBody, EndBody } from "../shared/types";
 
@@ -239,77 +241,7 @@ app.delete("/api/premonitions/:id", async (c) => {
 app.get("/api/premonitions/stats", async (c) => {
   const raw = Number(c.req.query("window_hours") ?? 24);
   const windowHours = Math.min(Math.max(Number.isFinite(raw) ? raw : 24, 1), 72);
-  const windowDays = windowHours / 24;
-
-  // All time comparisons go through julianday(). SQLite's datetime() returns
-  // 'YYYY-MM-DD HH:MM:SS' while our timestamps are 'YYYY-MM-DDTHH:MM:SS.sssZ';
-  // comparing those as strings is wrong ('T' sorts after ' '). julianday parses
-  // both and compares as numbers.
-  //
-  // An episode with no ended_at is assumed to run at most 72 hours, the ICHD-3
-  // maximum for a migraine attack. Without that cap, one attack she forgot to
-  // end would look "ongoing" forever and silently swallow every later
-  // premonition from these stats.
-  const paired = await c.env.DB.prepare(
-    `WITH eligible AS (
-       SELECT p.id, p.felt_at
-         FROM premonitions p
-        WHERE NOT EXISTS (
-          SELECT 1 FROM episodes e
-           WHERE e.source = 'app'
-             AND julianday(e.started_at) <= julianday(p.felt_at)
-             AND julianday(COALESCE(e.ended_at, datetime(e.started_at, '+72 hours')))
-                 >= julianday(p.felt_at)
-        )
-     )
-     SELECT g.id,
-            g.felt_at,
-            (SELECT min(e.started_at) FROM episodes e
-              WHERE e.started_at_time_known = 1
-                AND julianday(e.started_at) > julianday(g.felt_at)
-                AND julianday(e.started_at) <= julianday(g.felt_at) + ?) AS next_start
-       FROM eligible g`
-  )
-    .bind(windowDays)
-    .all<{ id: number; next_start: string | null; felt_at: string }>();
-
-  const rows = paired.results;
-  const followed = rows.filter((r) => r.next_start !== null);
-  const leads = followed
-    .map((r) => (Date.parse(r.next_start!) - Date.parse(r.felt_at)) / 3600000)
-    .sort((a, b) => a - b);
-
-  // Only episodes with a known start time can be said to have been "warned":
-  // an imported row anchored at local noon would produce a fictional lead time.
-  const totalEpisodes = await c.env.DB.prepare(
-    `SELECT count(*) AS n FROM episodes WHERE started_at_time_known = 1`
-  ).first<{ n: number }>();
-  const warned = await c.env.DB.prepare(
-    `SELECT count(*) AS n FROM episodes e
-      WHERE e.started_at_time_known = 1
-        AND EXISTS (SELECT 1 FROM premonitions p
-                     WHERE julianday(p.felt_at) < julianday(e.started_at)
-                       AND julianday(e.started_at) <= julianday(p.felt_at) + ?)`
-  )
-    .bind(windowDays)
-    .first<{ n: number }>();
-
-  const median = leads.length
-    ? leads[Math.floor((leads.length - 1) / 2)]
-    : null;
-
-  return c.json({
-    window_hours: windowHours,
-    premonitions_eligible: rows.length,
-    followed_by_headache: followed.length,
-    // Honest about power: these are meaningless on a handful of taps.
-    hit_rate: rows.length ? followed.length / rows.length : null,
-    warning_rate: totalEpisodes?.n ? (warned?.n ?? 0) / totalEpisodes.n : null,
-    lead_hours_median: median,
-    lead_hours_min: leads.length ? leads[0] : null,
-    lead_hours_max: leads.length ? leads[leads.length - 1] : null,
-    enough_data: rows.length >= 10 && followed.length >= 3,
-  });
+  return c.json(await premonitionStats(c.env.DB, windowHours));
 });
 
 // Delete an episode (undo a mis-tap).
@@ -324,6 +256,10 @@ app.delete("/api/episodes/:id", async (c) => {
   if (!row) return c.json({ error: "not found" }, 404);
   return c.json({ ok: true });
 });
+
+// --- MCP server ------------------------------------------------------------
+// Mounted before the SPA fallback so /mcp is never swallowed by index.html.
+app.route("/mcp", mcp);
 
 // --- Static SPA fallback ---------------------------------------------------
 app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));

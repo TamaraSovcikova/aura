@@ -1,0 +1,370 @@
+// Aura MCP server — JSON-RPC 2.0 over HTTP (MCP streamable-HTTP transport).
+// Mount at /mcp. Auth: Authorization: Bearer <ACCESS_PIN>, or ?token=<ACCESS_PIN>
+// for cloud-brokered connectors whose UI takes a URL but no headers.
+//
+// This server IS the insights engine. Aura computes deterministic statistics;
+// Claude reads them here and narrates. No LLM runs inside the app, so no health
+// number is ever hallucinated.
+//
+// Because Claude narrates from these tool descriptions, the epistemic guardrails
+// live in the descriptions themselves. Read them as part of the contract.
+
+import { Hono } from "hono";
+import type { Bindings } from "./db";
+import { localDate, nowIso } from "./db";
+import {
+  headacheDaysTrend,
+  monthSeries,
+  monthlyHeadacheDays,
+  premonitionStats,
+} from "./stats";
+
+export const mcp = new Hono<{ Bindings: Bindings }>();
+
+const ok = (id: unknown, result: unknown) => ({ jsonrpc: "2.0", id, result });
+const err = (id: unknown, code: number, message: string) => ({
+  jsonrpc: "2.0",
+  id,
+  error: { code, message },
+});
+const json = (v: unknown) => ({
+  content: [{ type: "text", text: JSON.stringify(v, null, 2) }],
+});
+
+function authorized(env: Bindings, header?: string, queryToken?: string): boolean {
+  const pin = env.ACCESS_PIN;
+  if (!pin) return true; // local dev with no secret configured
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : queryToken;
+  return token === pin;
+}
+
+// ── Tools ────────────────────────────────────────────────────────────────────
+
+const DATA_CAVEATS = [
+  "Episodes before 2026-07-04 were imported from an Obsidian diary: they have no end time (so no duration), and some have no reliable start time (anchored at local noon).",
+  "These are Monthly HEADACHE Days (MHD), not Monthly MIGRAINE Days (MMD). ICHD-3 criteria cannot be checked retroactively, so no imported attack is classified as migraine.",
+  "Weather and barometric pressure are mostly NULL until the historical backfill lands. Do not draw weather conclusions yet.",
+  "Aura records and counts. It never diagnoses and never recommends treatment.",
+].join(" ");
+
+const TOOLS = [
+  {
+    name: "get_overview",
+    description:
+      "High-level summary of the user's migraine history: totals, date span, headache days per month, severity distribution, and data provenance. Start here. " +
+      DATA_CAVEATS,
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "monthly_headache_days",
+    description:
+      "Headache days per calendar month, with average peak severity. A day counts once no matter how many entries it has. This is the number a neurologist works in. " +
+      "The series is contiguous: a month with zero headache days is included as 0 rather than omitted. Each month carries `complete`; when false the month was only partly observed (she started logging mid-month, or the month is still running) and must NOT be compared against full months.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "inclusive YYYY-MM-DD" },
+        to: { type: "string", description: "inclusive YYYY-MM-DD" },
+      },
+    },
+  },
+  {
+    name: "headache_days_trend",
+    description:
+      "Is it getting worse? Compares the mean headache days of the last 3 COMPLETE months against the previous 3 complete months. Partial months (the current one, and the first one she logged) are excluded and listed in `excluded_partial_months`, because averaging a part-month against full ones fabricates an improvement. " +
+      "Reports percent change and whether it meets the >=50% reduction clinicians treat as a treatment response. This is an observation about counts, NOT a claim that any treatment worked.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "list_episodes",
+    description:
+      "Individual episodes, newest first. Includes the free-text note, peak severity (0-10), and the quarantined self-reported fields. " +
+      DATA_CAVEATS,
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "inclusive YYYY-MM-DD" },
+        to: { type: "string", description: "inclusive YYYY-MM-DD" },
+        limit: { type: "number", description: "default 50, max 500" },
+      },
+    },
+  },
+  {
+    name: "search_notes",
+    description:
+      "Full-text search across the free-text notes the user wrote about each attack. Useful for questions like 'when did I mention the weather?' or 'which attacks involved my eye?'",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "substring to search for, case-insensitive" },
+        limit: { type: "number", description: "default 20, max 200" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "self_reported_triggers",
+    description:
+      "Frequency of the trigger labels the user tagged herself in her old Obsidian diary (e.g. 'Not enough sleep', 'Stress', 'Medication'). " +
+      "CRITICAL: these are her BELIEFS, not evidence. They are self-reported, recorded only on attack days, and have no control group, so they cannot establish causation and must never be presented as established triggers. " +
+      "In particular the 'Medication' tag marks when an attack was treated; it does NOT indicate medication overuse. " +
+      "Their only legitimate use is to compare belief against objective data once the weather backfill exists.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "premonition_stats",
+    description:
+      "Derived statistics for the 'I feel one coming' signal: hit rate (share of premonitions actually followed by a headache), warning rate (share of headaches that were preceded by one), and lead-time distribution. " +
+      "Premonitions felt while an attack was already underway are excluded. Check `enough_data` before drawing any conclusion; it is false until there are at least 10 eligible premonitions and 3 that were followed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        window_hours: {
+          type: "number",
+          description: "How long after a premonition a headache still counts as 'followed'. Default 24, max 72.",
+        },
+      },
+    },
+  },
+  {
+    name: "log_premonition",
+    description:
+      "Record that the user feels a migraine coming, right now. Writes a timestamped premonition. Use only when she says she feels one coming; never infer it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        note: { type: "string", description: "optional free text about the feeling" },
+        tz: { type: "string", description: "IANA timezone, defaults to Europe/Berlin" },
+      },
+    },
+  },
+] as const;
+
+// ── Tool implementations ─────────────────────────────────────────────────────
+
+/**
+ * The window over which we can honestly say a month had N headache days.
+ *
+ * It ends at her LAST recorded episode, not today. Zero-filling to "now" would
+ * invent migraine-free months out of a simple absence of data: a gap between two
+ * recorded episodes is a real zero (she was logging on both sides), but the
+ * trailing gap after her last entry is unknown, not zero.
+ */
+async function observedSpan(db: D1Database): Promise<{ first: string | null; last: string | null }> {
+  const r = await db
+    .prepare(`SELECT min(local_date) AS first, max(local_date) AS last FROM episodes`)
+    .first<{ first: string | null; last: string | null }>();
+  return { first: r?.first ?? null, last: r?.last ?? null };
+}
+
+async function handleTool(
+  name: string,
+  args: Record<string, unknown>,
+  env: Bindings
+): Promise<unknown> {
+  const db = env.DB;
+
+  switch (name) {
+    case "get_overview": {
+      const totals = await db
+        .prepare(
+          `SELECT count(*) AS episodes,
+                  count(DISTINCT local_date) AS headache_days,
+                  min(local_date) AS first_day,
+                  max(local_date) AS last_day,
+                  sum(CASE WHEN source = 'obsidian-import' THEN 1 ELSE 0 END) AS imported,
+                  sum(CASE WHEN source = 'app' THEN 1 ELSE 0 END) AS captured_in_app,
+                  sum(CASE WHEN started_at_time_known = 1 THEN 1 ELSE 0 END) AS with_known_start_time,
+                  round(avg(severity), 2) AS mean_peak_severity
+             FROM episodes`
+        )
+        .first();
+      const span = await observedSpan(db);
+      const series = monthSeries(await monthlyHeadacheDays(db), span.first, span.last ?? "");
+      const complete = series.filter((m) => m.complete);
+      const dist = await db
+        .prepare(
+          `SELECT severity, count(*) AS n FROM episodes
+            WHERE severity IS NOT NULL GROUP BY severity ORDER BY severity`
+        )
+        .all();
+      const prem = await db.prepare(`SELECT count(*) AS n FROM premonitions`).first<{ n: number }>();
+      // Averaged over COMPLETE months only, and zero-headache months are counted
+      // (a GROUP BY would drop them, inflating the mean).
+      const meanMhd = complete.length
+        ? Number((complete.reduce((s, m) => s + m.headache_days, 0) / complete.length).toFixed(1))
+        : null;
+      return json({
+        ...totals,
+        months_covered: series.length,
+        complete_months: complete.length,
+        mean_headache_days_per_month_complete_months_only: meanMhd,
+        severity_distribution: dist.results,
+        premonitions_logged: prem?.n ?? 0,
+        caveats: DATA_CAVEATS,
+      });
+    }
+
+    case "monthly_headache_days": {
+      const rows = await monthlyHeadacheDays(
+        db,
+        args.from as string | undefined,
+        args.to as string | undefined
+      );
+      const span = await observedSpan(db);
+      const from = (args.from as string | undefined) ?? span.first;
+      const to = (args.to as string | undefined) ?? span.last ?? "";
+      return json(monthSeries(rows, from, to));
+    }
+
+    case "headache_days_trend": {
+      const span = await observedSpan(db);
+      return json(
+        headacheDaysTrend(monthSeries(await monthlyHeadacheDays(db), span.first, span.last ?? ""))
+      );
+    }
+
+    case "list_episodes": {
+      const limit = Math.min(Math.max(Number(args.limit ?? 50) || 50, 1), 500);
+      const where: string[] = [];
+      const binds: unknown[] = [];
+      if (args.from) {
+        where.push("local_date >= ?");
+        binds.push(args.from);
+      }
+      if (args.to) {
+        where.push("local_date <= ?");
+        binds.push(args.to);
+      }
+      binds.push(limit);
+      const rows = await db
+        .prepare(
+          `SELECT id, local_date, started_at, started_at_time_known, ended_at, severity,
+                  meds, note, self_reported_triggers, self_reported_type, onset_raw,
+                  pressure_hpa, temp_c, source
+             FROM episodes
+            ${where.length ? "WHERE " + where.join(" AND ") : ""}
+            ORDER BY local_date DESC LIMIT ?`
+        )
+        .bind(...binds)
+        .all();
+      return json(rows.results);
+    }
+
+    case "search_notes": {
+      const q = String(args.query ?? "").trim();
+      if (!q) throw new Error("query is required");
+      const limit = Math.min(Math.max(Number(args.limit ?? 20) || 20, 1), 200);
+      const rows = await db
+        .prepare(
+          `SELECT id, local_date, severity, note FROM episodes
+            WHERE note IS NOT NULL AND lower(note) LIKE '%' || lower(?) || '%'
+            ORDER BY local_date DESC LIMIT ?`
+        )
+        .bind(q, limit)
+        .all();
+      return json({ query: q, matches: rows.results.length, results: rows.results });
+    }
+
+    case "self_reported_triggers": {
+      const rows = await db
+        .prepare(
+          `SELECT self_reported_triggers AS t FROM episodes
+            WHERE self_reported_triggers IS NOT NULL AND self_reported_triggers <> ''`
+        )
+        .all<{ t: string }>();
+      const counts = new Map<string, number>();
+      for (const r of rows.results) {
+        for (const tag of r.t.split(";").map((s) => s.trim()).filter(Boolean)) {
+          counts.set(tag, (counts.get(tag) ?? 0) + 1);
+        }
+      }
+      const sorted = [...counts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([trigger, count]) => ({ trigger, count }));
+      return json({
+        episodes_with_tags: rows.results.length,
+        triggers: sorted,
+        warning:
+          "These are self-reported beliefs recorded only on attack days. There is no control group, so they cannot establish causation. Do not present them as established triggers.",
+      });
+    }
+
+    case "premonition_stats": {
+      const raw = Number(args.window_hours ?? 24);
+      const w = Math.min(Math.max(Number.isFinite(raw) ? raw : 24, 1), 72);
+      return json(await premonitionStats(db, w));
+    }
+
+    case "log_premonition": {
+      const feltAt = nowIso();
+      const tz = (args.tz as string | undefined) ?? "Europe/Berlin";
+      const row = await db
+        .prepare(
+          `INSERT INTO premonitions (felt_at, local_date, note, tz, source)
+           VALUES (?, ?, ?, ?, 'mcp') RETURNING *`
+        )
+        .bind(feltAt, localDate(feltAt, tz), (args.note as string | undefined) ?? null, tz)
+        .first();
+      return json({ logged: row });
+    }
+
+    default:
+      throw new Error(`Unknown tool: ${name}`);
+  }
+}
+
+// ── JSON-RPC transport ───────────────────────────────────────────────────────
+
+mcp.post("/", async (c) => {
+  if (!authorized(c.env, c.req.header("Authorization"), c.req.query("token"))) {
+    return c.json(err(null, -32000, "Unauthorized"), 401);
+  }
+
+  let body: { jsonrpc: string; id: unknown; method: string; params?: Record<string, unknown> };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(err(null, -32700, "Parse error"), 400);
+  }
+
+  const { id, method, params = {} } = body;
+
+  if (method === "initialize") {
+    return c.json(
+      ok(id, {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "aura", version: "1.0.0" },
+      })
+    );
+  }
+
+  if (method === "tools/list") return c.json(ok(id, { tools: TOOLS }));
+
+  if (method === "tools/call") {
+    const toolName = params.name as string;
+    const toolArgs = (params.arguments ?? {}) as Record<string, unknown>;
+    try {
+      return c.json(ok(id, await handleTool(toolName, toolArgs, c.env)));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Internal error";
+      return c.json(
+        ok(id, { content: [{ type: "text", text: `Error: ${msg}` }], isError: true })
+      );
+    }
+  }
+
+  // notifications/* expect no response body.
+  if (method.startsWith("notifications/")) return c.body(null, 204);
+
+  return c.json(err(id, -32601, `Method not found: ${method}`), 404);
+});
+
+mcp.get("/", (c) =>
+  c.json({
+    name: "aura",
+    transport: "streamable-http",
+    tools: TOOLS.map((t) => t.name),
+  })
+);
