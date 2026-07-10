@@ -4,6 +4,7 @@ import { localDate, nowIso, upsertPeakSample, validSeverity } from "./db";
 import { mcp } from "./mcp";
 import { premonitionStats } from "./stats";
 import { backfillDays, refreshRecentDays } from "./days";
+import { triggerAnalysis } from "./triggers";
 import { fetchEnrichment, roundCoord } from "./enrich";
 import type { Episode, StartBody, EndBody } from "../shared/types";
 
@@ -295,6 +296,8 @@ app.get("/api/days", async (c) => {
   ).bind(...binds).all();
   return c.json(res.results);
 });
+
+app.get("/api/triggers", async (c) => c.json(await triggerAnalysis(c.env.DB)));
 
 // --- MCP server ------------------------------------------------------------
 // Mounted before the SPA fallback so /mcp is never swallowed by index.html.

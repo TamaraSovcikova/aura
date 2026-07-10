@@ -18,6 +18,7 @@ import {
   monthlyHeadacheDays,
   premonitionStats,
 } from "./stats";
+import { beliefVsData, premonitionConversion, triggerAnalysis } from "./triggers";
 
 export const mcp = new Hono<{ Bindings: Bindings }>();
 
@@ -44,7 +45,7 @@ const DATA_CAVEATS = [
   "Episodes before 2026-07-04 were imported from an Obsidian diary: they have no end time (so no duration), and some have no reliable start time (anchored at local noon).",
   "These are Monthly HEADACHE Days (MHD), not Monthly MIGRAINE Days (MMD). ICHD-3 criteria cannot be checked retroactively, so no imported attack is classified as migraine.",
   "Weather does NOT live on the episode: the per-episode pressure columns are mostly NULL because geolocation was rarely granted. Day-level weather lives in the `days` table, keyed on local_date and the location timeline, and covers every day whether or not she had a headache.",
-  "The trigger analysis is not built yet. Do not compare headache days against control days by hand and present the result as a finding: it would be unadjusted, unweighted, and untested.",
+  "Do NOT compare headache days against control days by hand: an unadjusted, unweighted, untested difference is exactly how a false trigger gets believed. Use the `trigger_analysis` tool, which stratifies by place and month and corrects for multiple comparisons, and report its `verdict` field.",
   "Aura records and counts. It never diagnoses and never recommends treatment.",
 ].join(" ");
 
@@ -125,6 +126,30 @@ const TOOLS = [
           description: "How long after a premonition a headache still counts as 'followed'. Default 24, max 72.",
         },
       },
+    },
+  },
+  {
+    name: "trigger_analysis",
+    description:
+      "Case-control test of whether objective day-level factors (barometric pressure and its 24h change, sharpest 3h fall, temperature, humidity, daylight) differ between her headache days and her non-headache days. " +
+      "Every comparison is stratified by (place, month) so season and country cannot masquerade as a trigger, and Benjamini-Hochberg q-values control the false discovery rate across the seven factors. " +
+      "READ THE `verdict` FIELD, not the raw difference. A verdict of 'no evidence of association' is a real result and must be reported as such, never softened into 'a slight trend'. Nothing here establishes causation, and none of it is medical advice.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "belief_vs_data",
+    description:
+      "Compares what the user believed triggered her migraines (her own tags: sleep, stress, late meal) against the objective data. " +
+      "CRITICAL: she recorded those tags ONLY on headache days, so there is no control group for them and this CANNOT show that stress causes her migraines. Always surface the `limitation` field. The only question this answers is narrower: do the days she blamed on X look meteorologically different from her other headache days?",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "premonition_conversion",
+    description:
+      "Compares the days a premonition turned into a headache against the days it did not. Both groups share whatever produces the feeling, which makes this a cleaner contrast than headache days against normal days. Requires at least 10 of each; check `enough_data`. Her false alarms are the valuable half of this data.",
+    inputSchema: {
+      type: "object",
+      properties: { window_hours: { type: "number", description: "Default 24, max 72." } },
     },
   },
   {
@@ -295,6 +320,18 @@ async function handleTool(
       const raw = Number(args.window_hours ?? 24);
       const w = Math.min(Math.max(Number.isFinite(raw) ? raw : 24, 1), 72);
       return json(await premonitionStats(db, w));
+    }
+
+    case "trigger_analysis":
+      return json(await triggerAnalysis(db));
+
+    case "belief_vs_data":
+      return json(await beliefVsData(db));
+
+    case "premonition_conversion": {
+      const raw = Number(args.window_hours ?? 24);
+      const w = Math.min(Math.max(Number.isFinite(raw) ? raw : 24, 1), 72);
+      return json(await premonitionConversion(db, w));
     }
 
     case "log_premonition": {
