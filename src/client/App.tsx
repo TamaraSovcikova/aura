@@ -75,6 +75,11 @@ function pendingCount(list: LocalEpisode[]): number {
     .length;
 }
 
+// A shortcut launch (?action=…) must be handled exactly once per page load. A
+// module-level flag survives StrictMode's double-mount and any effect re-run within
+// the same launch, and resets naturally on the next real navigation.
+let deepLinkConsumed = false;
+
 type Tab = "today" | "insights";
 
 export default function App() {
@@ -293,6 +298,32 @@ export default function App() {
       }
     }
   }, []);
+
+  // The home-screen shortcut (F15) opens the app at /?action=start and logs a
+  // migraine immediately. Handled at most once per launch (the module-level flag
+  // survives StrictMode's double-mount). It must not open a second attack when one is
+  // already running, and after a fresh launch the open attack may live only on the
+  // server, not yet in the local outbox, so the guard checks the server too. The
+  // async server round-trip also makes this robust to a reconcile racing on launch.
+  useEffect(() => {
+    if (!pinReady || deepLinkConsumed) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("action") !== "start") return;
+    deepLinkConsumed = true;
+    window.history.replaceState({}, "", window.location.pathname);
+    (async () => {
+      if (findOpen(loadOutbox())) return; // already open on this device
+      let serverOpen = null;
+      try {
+        serverOpen = await apiCurrent();
+      } catch {
+        /* offline: fall back to the local check below */
+      }
+      // The initial-load effect adopts a server-open attack; don't duplicate it.
+      if (serverOpen || findOpen(loadOutbox())) return;
+      onStart();
+    })();
+  }, [pinReady, onStart]);
 
   const onEnd = useCallback(() => {
     const list = loadOutbox();
