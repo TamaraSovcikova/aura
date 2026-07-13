@@ -58,11 +58,11 @@ export default function Insights({ onUnauthorized }: { onUnauthorized: () => voi
     void load();
   }, [load]);
 
-  if (error) return <p className="mt-16 text-center text-sm text-slate-500">{error}</p>;
-  if (!summary) return <p className="mt-16 text-center text-sm text-slate-600">Counting…</p>;
+  if (error) return <p className="mt-16 text-center text-sm text-slate-400">{error}</p>;
+  if (!summary) return <p className="mt-16 text-center text-sm text-slate-400">Counting…</p>;
   if (summary.episodes === 0) {
     return (
-      <p className="mt-16 text-center text-sm text-slate-500">
+      <p className="mt-16 text-center text-sm text-slate-400">
         Nothing logged yet. The numbers appear once there is something to count.
       </p>
     );
@@ -88,19 +88,19 @@ function Header({ s }: { s: Summary }) {
           <h2 className="text-2xl font-semibold text-slate-100 tabular-nums">
             {s.headache_days}
           </h2>
-          <p className="text-xs text-slate-500">headache days</p>
+          <p className="text-xs text-slate-400">headache days</p>
         </div>
         <div>
           <h2 className="text-2xl font-semibold text-rose-300 tabular-nums">
             {s.migraine_days}
           </h2>
-          <p className="text-xs text-slate-500">migraine days</p>
+          <p className="text-xs text-slate-400">migraine days</p>
         </div>
       </div>
-      <p className="mt-2 text-sm text-slate-500">
+      <p className="mt-2 text-sm text-slate-400">
         {s.episodes} episodes, {s.first_day} to {s.last_day}.
       </p>
-      <p className="mt-2 text-xs leading-relaxed text-slate-600">
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">
         Migraine days are the ones meeting ICHD-3 criteria from the symptoms you
         recorded. The imported history has none, so it counts as headache days only.
       </p>
@@ -113,13 +113,13 @@ function MonthChart({ s }: { s: Summary }) {
   const max = Math.max(1, ...months.map((m) => m.headache_days));
   return (
     <section>
-      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
+      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-400">
         Headache days per month
       </h3>
       <ul className="flex flex-col gap-1.5">
         {months.map((m) => (
           <li key={m.month} className="flex items-center gap-2 text-xs">
-            <span className={`w-14 shrink-0 ${m.complete ? "text-slate-400" : "text-slate-600"}`}>
+            <span className={`w-14 shrink-0 ${m.complete ? "text-slate-300" : "text-slate-400"}`}>
               {monthLabel(m.month)}
             </span>
             <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-800">
@@ -132,7 +132,7 @@ function MonthChart({ s }: { s: Summary }) {
             </span>
             <span
               className={`w-6 shrink-0 text-right tabular-nums ${
-                m.complete ? "text-slate-300" : "text-slate-600"
+                m.complete ? "text-slate-300" : "text-slate-400"
               }`}
             >
               {m.headache_days}
@@ -141,7 +141,7 @@ function MonthChart({ s }: { s: Summary }) {
         ))}
       </ul>
       {months.some((m) => !m.complete) && (
-        <p className="mt-2 text-xs text-slate-600">
+        <p className="mt-2 text-xs text-slate-400">
           Grey months were only partly observed. They are excluded from every average,
           because averaging a part-month against full ones invents a change.
         </p>
@@ -155,12 +155,12 @@ function MedTable({ s }: { s: Summary }) {
   if (rows.length === 0) return null;
   return (
     <section>
-      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
+      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-400">
         Acute medication days
       </h3>
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-xs text-slate-600">
+          <tr className="text-left text-xs text-slate-400">
             <th className="pb-1 font-normal">Month</th>
             <th className="pb-1 text-right font-normal">Any</th>
             <th className="pb-1 text-right font-normal">Triptan</th>
@@ -192,7 +192,7 @@ function MedTable({ s }: { s: Summary }) {
           ))}
         </tbody>
       </table>
-      <p className="mt-2 text-xs leading-relaxed text-slate-600">
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">
         Red means that month reached an ICHD-3 day count (triptans on 10 days, simple
         analgesics on 15). Sustained past three months, that is worth showing a
         neurologist. It is a count, not a diagnosis, and it is never inferred from an
@@ -231,7 +231,7 @@ function CycleCard({
 
   return (
     <section className="rounded-xl bg-slate-900/60 p-4">
-      <h3 className="text-xs font-medium uppercase tracking-wide text-slate-500">Cycle</h3>
+      <h3 className="text-xs font-medium uppercase tracking-wide text-slate-400">Cycle</h3>
 
       <p className="mt-2 text-sm text-slate-300">
         {ctx.cycle_day !== null
@@ -247,7 +247,7 @@ function CycleCard({
           <button
             disabled={busy}
             onClick={() => run(() => apiCycleDelete(loggedToday.id))}
-            className="text-xs text-slate-500 underline disabled:opacity-50"
+            className="flex min-h-11 items-center px-1 text-xs text-slate-400 underline disabled:opacity-50"
           >
             Undo
           </button>
@@ -257,21 +257,21 @@ function CycleCard({
           <button
             disabled={busy}
             onClick={() => run(() => apiLogPeriod(today))}
-            className="flex-1 rounded-lg bg-slate-800 py-2.5 text-sm text-slate-200 transition active:scale-95 disabled:opacity-50"
+            className="flex-1 rounded-lg bg-slate-800 min-h-11 py-2.5 text-sm text-slate-200 transition active:scale-95 disabled:opacity-50"
           >
             Period started today
           </button>
           <button
             disabled={busy}
             onClick={() => run(() => apiLogPeriod(shiftDay(today, -1)))}
-            className="rounded-lg bg-slate-800 px-3 py-2.5 text-xs text-slate-400 transition active:scale-95 disabled:opacity-50"
+            className="rounded-lg bg-slate-800 px-3 min-h-11 py-2.5 text-xs text-slate-400 transition active:scale-95 disabled:opacity-50"
           >
             Yesterday
           </button>
         </div>
       )}
 
-      <p className="mt-3 text-xs leading-relaxed text-slate-600">
+      <p className="mt-3 text-xs leading-relaxed text-slate-400">
         {starts.length} logged. One tap a month is enough: the cycle day of every day in
         between is worked out from these dates, so days without a headache count too.
         There is no cycle data in your old notes, so this question can only be answered
@@ -284,7 +284,7 @@ function CycleCard({
 function Cards({ s }: { s: Summary }) {
   return (
     <section>
-      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
+      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-400">
         What the data says
       </h3>
       <ul className="flex flex-col gap-3">
@@ -293,7 +293,7 @@ function Cards({ s }: { s: Summary }) {
             <div className="flex items-baseline justify-between gap-2">
               <h4 className="text-sm font-medium text-slate-200">{i.title}</h4>
               {i.kind === "gated" && (
-                <span className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500">
+                <span className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">
                   tested
                 </span>
               )}
@@ -338,21 +338,21 @@ function Exports({ onUnauthorized }: { onUnauthorized: () => void }) {
 
   return (
     <section>
-      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
+      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-400">
         Export
       </h3>
       <div className="flex gap-2">
         <button
           disabled={busy !== null}
           onClick={() => download("doctor")}
-          className="flex-1 rounded-lg bg-slate-800 py-2.5 text-sm text-slate-200 transition active:scale-95 disabled:opacity-50"
+          className="flex-1 rounded-lg bg-slate-800 min-h-11 py-2.5 text-sm text-slate-200 transition active:scale-95 disabled:opacity-50"
         >
           {busy === "doctor" ? "Preparing…" : "Summary to print"}
         </button>
         <button
           disabled={busy !== null}
           onClick={() => download("csv")}
-          className="rounded-lg bg-slate-800 px-4 py-2.5 text-sm text-slate-400 transition active:scale-95 disabled:opacity-50"
+          className="rounded-lg bg-slate-800 px-4 min-h-11 py-2.5 text-sm text-slate-400 transition active:scale-95 disabled:opacity-50"
         >
           {busy === "csv" ? "…" : "CSV"}
         </button>
@@ -360,11 +360,11 @@ function Exports({ onUnauthorized }: { onUnauthorized: () => void }) {
       <button
         disabled={busy !== null}
         onClick={() => download("obsidian")}
-        className="mt-2 w-full rounded-lg bg-slate-800 py-2.5 text-sm text-slate-400 transition active:scale-95 disabled:opacity-50"
+        className="mt-2 w-full rounded-lg bg-slate-800 min-h-11 py-2.5 text-sm text-slate-400 transition active:scale-95 disabled:opacity-50"
       >
         {busy === "obsidian" ? "Preparing…" : "Obsidian snapshot (.md)"}
       </button>
-      <p className="mt-2 text-xs text-slate-600">
+      <p className="mt-2 text-xs text-slate-400">
         The summary opens in a new tab to print to PDF. The Obsidian snapshot is a
         read-only markdown file for your vault; re-download it to refresh.
       </p>

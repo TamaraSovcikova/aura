@@ -23,8 +23,8 @@ interface Shape {
 const FRONT: Shape[] = [
   { id: "l-forehead", cx: 74, cy: 74, rx: 22, ry: 16 },
   { id: "r-forehead", cx: 126, cy: 74, rx: 22, ry: 16 },
-  { id: "l-temple", cx: 44, cy: 104, rx: 13, ry: 20 },
-  { id: "r-temple", cx: 156, cy: 104, rx: 13, ry: 20 },
+  { id: "l-temple", cx: 42, cy: 104, rx: 17, ry: 22 },
+  { id: "r-temple", cx: 158, cy: 104, rx: 17, ry: 22 },
   { id: "l-eye", cx: 78, cy: 116, rx: 18, ry: 13 },
   { id: "r-eye", cx: 122, cy: 116, rx: 18, ry: 13 },
   { id: "l-cheek", cx: 80, cy: 162, rx: 20, ry: 20 },
@@ -65,7 +65,7 @@ export default function HeadMap({
           <button
             key={v}
             onClick={() => setView(v)}
-            className={`rounded-md px-3 py-1 capitalize transition ${
+            className={`flex min-h-11 items-center rounded-md px-5 capitalize transition ${
               view === v ? "bg-slate-700 text-slate-100" : "text-slate-400"
             }`}
           >
@@ -74,7 +74,7 @@ export default function HeadMap({
         ))}
       </div>
 
-      <svg viewBox="0 0 200 240" className="h-56 w-auto" role="group" aria-label="Head map">
+      <svg viewBox="0 0 200 240" className="h-72 w-auto" role="group" aria-label="Head map">
         {/* Head outline. Front adds a jaw taper; back is a plain oval. */}
         <ellipse
           cx={100}
@@ -115,7 +115,7 @@ export default function HeadMap({
         })}
       </svg>
 
-      <p className="mt-1 h-4 text-xs text-slate-500">
+      <p className="mt-1 h-4 text-xs text-slate-400">
         {value.length === 0
           ? "Tap where it hurts"
           : side === "one"

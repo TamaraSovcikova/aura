@@ -547,7 +547,7 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
     <button
       onClick={() => onChange(id)}
       className={`flex-1 rounded-lg py-2.5 text-sm transition ${
-        tab === id ? "bg-slate-800 text-slate-100" : "text-slate-500"
+        tab === id ? "bg-slate-800 text-slate-100" : "text-slate-400"
       }`}
     >
       {label}
@@ -594,14 +594,14 @@ function RecentList({
 }) {
   if (episodes.length === 0) {
     return (
-      <p className="mt-8 text-center text-sm text-slate-500">
+      <p className="mt-8 text-center text-sm text-slate-400">
         No migraines logged yet.
       </p>
     );
   }
   return (
     <section className="mt-8">
-      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
         Recent · {episodes.length}
       </h2>
       <ul className="divide-y divide-slate-800 rounded-xl bg-slate-900/60">
@@ -619,7 +619,7 @@ function RecentList({
                   minute: "2-digit",
                 })}
                 {e.severity !== null ? (
-                  <span className="ml-2 text-slate-500 tabular-nums">
+                  <span className="ml-2 text-slate-400 tabular-nums">
                     {e.severity}/{SEVERITY_MAX}
                   </span>
                 ) : null}
@@ -637,7 +637,7 @@ function RecentList({
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-center text-xs text-slate-600">
+      <p className="mt-2 text-center text-xs text-slate-400">
         Tap an entry to edit or delete it.
       </p>
     </section>
@@ -714,13 +714,13 @@ function EditPanel({
       <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-slate-900 p-6 sm:rounded-2xl">
         <div className="flex items-baseline justify-between">
           <h3 className="text-base font-semibold text-slate-100">Edit entry</h3>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-slate-400">
             {episode.source && episode.source !== "app" ? "imported" : "logged"}
           </span>
         </div>
 
         {/* Editing happens after the fact, so precise times are affordable here. */}
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-400">
           Started
         </p>
         <input
@@ -739,7 +739,7 @@ function EditPanel({
           I know the onset time (uncheck if it woke you or you noticed late)
         </label>
 
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-400">
           Ended
         </p>
         <input
@@ -755,7 +755,7 @@ function EditPanel({
         )}
 
         <div className="mt-4 mb-2 flex items-baseline justify-between">
-          <p className="text-xs uppercase tracking-wide text-slate-500">
+          <p className="text-xs uppercase tracking-wide text-slate-400">
             Peak severity
           </p>
           <span className="text-sm tabular-nums text-slate-300">
@@ -771,7 +771,7 @@ function EditPanel({
           onChange={(e) => setSeverity(Number(e.target.value))}
           className="w-full accent-indigo-500"
         />
-        <div className="flex justify-between text-[10px] text-slate-600">
+        <div className="flex justify-between text-[10px] text-slate-400">
           <span>0</span>
           <span>5</span>
           <span>10</span>
@@ -779,25 +779,25 @@ function EditPanel({
         {severity !== null && (
           <button
             onClick={() => setSeverity(null)}
-            className="mt-1 text-xs text-slate-500 underline"
+            className="mt-1 flex min-h-11 items-center px-1 text-xs text-slate-400 underline"
           >
             clear severity
           </button>
         )}
 
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-400">
           Meds taken
         </p>
         <input
           value={meds}
           onChange={(e) => setMeds(e.target.value)}
           placeholder="e.g. sumatriptan 50mg"
-          className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
+          className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 outline-none"
         />
 
         <VoiceNoteField value={note} onChange={setNote} />
 
-        <p className="mt-5 mb-1 text-xs uppercase tracking-wide text-slate-500">
+        <p className="mt-5 mb-1 text-xs uppercase tracking-wide text-slate-400">
           Symptoms
         </p>
         <SymptomDetails value={attrs} onChange={setAttrs} />
@@ -808,13 +808,13 @@ function EditPanel({
             <div className="mt-3 flex gap-3">
               <button
                 onClick={() => setConfirmDelete(false)}
-                className="flex-1 rounded-lg bg-slate-800 py-2 text-sm text-slate-300"
+                className="min-h-11 flex-1 rounded-lg bg-slate-800 py-2 text-sm text-slate-300"
               >
                 Keep
               </button>
               <button
                 onClick={onDelete}
-                className="flex-1 rounded-lg bg-rose-600 py-2 text-sm font-medium text-white"
+                className="min-h-11 flex-1 rounded-lg bg-rose-600 py-2 text-sm font-medium text-white"
               >
                 Delete
               </button>
@@ -885,7 +885,7 @@ function VoiceNoteField({
   return (
     <>
       <div className="mt-4 mb-2 flex items-center justify-between">
-        <p className="text-xs uppercase tracking-wide text-slate-500">Note</p>
+        <p className="text-xs uppercase tracking-wide text-slate-400">Note</p>
         {supportsVoice() && (
           <button
             onClick={toggle}
@@ -904,10 +904,10 @@ function VoiceNoteField({
         onChange={(e) => onChange(e.target.value)}
         rows={3}
         placeholder="woke up with it, behind left eye…"
-        className="w-full resize-none rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
+        className="w-full resize-none rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 outline-none"
       />
       {listening && (
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-slate-400">
           Take your time. Pauses are fine.
         </p>
       )}
@@ -941,7 +941,7 @@ function StartAdjust({
     return (
       <button
         onClick={() => setShow(true)}
-        className="text-xs text-slate-500 underline underline-offset-2"
+        className="flex min-h-11 items-center px-2 text-xs text-slate-400 underline underline-offset-2"
       >
         Started {open.time_known ? clockHM(open.started_at) : "earlier"} · adjust
       </button>
@@ -958,17 +958,17 @@ function StartAdjust({
               onAdjust(p.started());
               setShow(false);
             }}
-            className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs text-slate-300 transition active:scale-95"
+            className="flex min-h-11 items-center rounded-lg bg-slate-800 px-4 text-xs text-slate-300 transition active:scale-95"
           >
             {p.label}
           </button>
         ))}
       </div>
-      <p className="max-w-xs text-center text-[11px] leading-relaxed text-slate-600">
+      <p className="max-w-xs text-center text-[11px] leading-relaxed text-slate-400">
         Marks the onset as an estimate: the day stays exact, the timing is kept out
         of the premonition analysis.
       </p>
-      <button onClick={() => setShow(false)} className="text-xs text-slate-500">
+      <button onClick={() => setShow(false)} className="flex min-h-11 items-center px-4 text-xs text-slate-400">
         Cancel
       </button>
     </div>
@@ -1011,7 +1011,7 @@ function EndPanel({
           How was it? (optional)
         </h3>
 
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-400">
           Ended
         </p>
         <div className="flex flex-wrap gap-2">
@@ -1019,7 +1019,7 @@ function EndPanel({
             <button
               key={o.min}
               onClick={() => setEndMin(o.min)}
-              className={`rounded-lg px-3 py-2 text-sm transition ${
+              className={`flex min-h-11 items-center rounded-lg px-4 text-sm transition ${
                 endMin === o.min
                   ? "bg-indigo-500 text-white"
                   : "bg-slate-800 text-slate-300"
@@ -1030,7 +1030,7 @@ function EndPanel({
           ))}
         </div>
 
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-400">
           Severity
         </p>
         <div className="flex gap-2">
@@ -1038,7 +1038,7 @@ function EndPanel({
             <button
               key={l.level}
               onClick={() => setSeverity(severity === l.level ? null : l.level)}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm transition ${
+              className={`flex min-h-11 flex-1 items-center justify-center rounded-lg px-3 text-sm transition ${
                 severity === l.level
                   ? "bg-indigo-500 text-white"
                   : "bg-slate-800 text-slate-300"
@@ -1049,14 +1049,14 @@ function EndPanel({
           ))}
         </div>
 
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-400">
           Meds taken
         </p>
         <input
           value={meds}
           onChange={(e) => setMeds(e.target.value)}
           placeholder="e.g. sumatriptan 50mg"
-          className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
+          className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 outline-none"
         />
 
         <VoiceNoteField value={note} onChange={setNote} />
@@ -1069,7 +1069,7 @@ function EndPanel({
           ) : (
             <button
               onClick={() => setShowSymptoms(true)}
-              className="w-full rounded-lg border border-slate-700 py-2 text-sm text-slate-400"
+              className="min-h-11 w-full rounded-lg border border-slate-700 py-2 text-sm text-slate-400"
             >
               Add symptom details (optional)
             </button>
@@ -1122,7 +1122,7 @@ function PinGate({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="PIN"
-        className="w-full rounded-lg bg-slate-800 px-3 py-3 text-center text-slate-100 placeholder:text-slate-500 outline-none"
+        className="w-full rounded-lg bg-slate-800 px-3 py-3 text-center text-slate-100 placeholder:text-slate-400 outline-none"
       />
       {error && <p className="text-sm text-rose-400">{error}</p>}
       <button
