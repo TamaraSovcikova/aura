@@ -158,7 +158,8 @@ const TOOLS = [
   {
     name: "summary",
     description:
-      "The dashboard in one call: monthly headache days (with `complete` flags), the quarter-on-quarter trend, severity distribution, acute-medication days per month with the ICHD-3 day counts, control-day coverage, and the deterministic insight cards. Each card carries `kind`: 'fact' is a count, 'gated' depends on a statistical test that reports its own power.",
+      "The dashboard in one call: monthly headache days (with `complete` flags), the quarter-on-quarter trend, severity distribution, acute-medication days per month with the ICHD-3 day counts, control-day coverage, Monthly Migraine Days (`migraine_days`) plus the `classified` breakdown, and the deterministic insight cards. " +
+      "`migraine_days` counts only app attacks whose recorded symptoms meet the ICHD-3 migraine criteria; the imported diary carries no symptoms and is never classified, so it contributes to headache days only. Each card carries `kind`: 'fact' is a count, 'gated' depends on a statistical test that reports its own power.",
     inputSchema: { type: "object", properties: {} },
   },
   {

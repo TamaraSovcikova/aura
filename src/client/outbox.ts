@@ -1,4 +1,5 @@
 import type { EndBody } from "../shared/types";
+import type { Attrs } from "./SymptomDetails";
 
 // A migraine episode captured on the device. Lives in localStorage until it is
 // fully synced to the server, so a log is never lost to a dead connection.
@@ -15,6 +16,8 @@ export interface LocalEpisode {
   severity: number | null;
   meds: string | null;
   note: string | null;
+  /** Optional ICHD-3 attributes captured in the end panel; null until provided. */
+  attrs: Attrs | null;
   startedSynced: boolean;
   endedSynced: boolean;
 }
@@ -52,6 +55,7 @@ export function newLocalEpisode(input: {
     severity: null,
     meds: null,
     note: null,
+    attrs: null,
     startedSynced: false,
     endedSynced: false,
   };
@@ -89,6 +93,18 @@ export async function reconcile(
           severity: e.severity ?? undefined,
           meds: e.meds ?? undefined,
           note: e.note ?? undefined,
+          // Attributes ride the same end call, so an offline log syncs them too.
+          ...(e.attrs
+            ? {
+                pain_regions: e.attrs.pain_regions,
+                quality: e.attrs.quality,
+                aggravated_by_activity: e.attrs.aggravated_by_activity,
+                nausea: e.attrs.nausea,
+                photophobia: e.attrs.photophobia,
+                phonophobia: e.attrs.phonophobia,
+                aura: e.attrs.aura,
+              }
+            : {}),
         });
         e.endedSynced = true;
       }

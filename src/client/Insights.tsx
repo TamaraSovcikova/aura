@@ -82,15 +82,26 @@ export default function Insights({ onUnauthorized }: { onUnauthorized: () => voi
 function Header({ s }: { s: Summary }) {
   return (
     <section>
-      <h2 className="text-2xl font-semibold text-slate-100 tabular-nums">
-        {s.headache_days} headache days
-      </h2>
-      <p className="mt-1 text-sm text-slate-500">
+      <div className="flex items-baseline gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-100 tabular-nums">
+            {s.headache_days}
+          </h2>
+          <p className="text-xs text-slate-500">headache days</p>
+        </div>
+        <div>
+          <h2 className="text-2xl font-semibold text-rose-300 tabular-nums">
+            {s.migraine_days}
+          </h2>
+          <p className="text-xs text-slate-500">migraine days</p>
+        </div>
+      </div>
+      <p className="mt-2 text-sm text-slate-500">
         {s.episodes} episodes, {s.first_day} to {s.last_day}.
       </p>
       <p className="mt-2 text-xs leading-relaxed text-slate-600">
-        Headache days, not migraine days. Aura will not call an attack a migraine on
-        evidence it does not have.
+        Migraine days are the ones meeting ICHD-3 criteria from the symptoms you
+        recorded. The imported history has none, so it counts as headache days only.
       </p>
     </section>
   );

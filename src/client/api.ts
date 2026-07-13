@@ -60,10 +60,26 @@ export async function apiList(limit = 30): Promise<Episode[]> {
   return parse<Episode[]>(r, "list");
 }
 
-export async function apiPatch(
-  id: number,
-  body: Partial<Episode>
-): Promise<Episode> {
+/** Everything the edit panel can change. Attribute booleans go over the wire as
+ *  booleans; the server coerces them to 0/1 and derives `side` from any regions. */
+export interface EpisodePatch {
+  severity?: number | null;
+  meds?: string | null;
+  note?: string | null;
+  started_at?: string;
+  ended_at?: string | null;
+  started_at_time_known?: number;
+  side?: "one" | "both" | null;
+  quality?: "throbbing" | "pressing" | null;
+  aggravated_by_activity?: boolean | null;
+  nausea?: boolean | null;
+  photophobia?: boolean | null;
+  phonophobia?: boolean | null;
+  aura?: boolean | null;
+  pain_regions?: string[] | null;
+}
+
+export async function apiPatch(id: number, body: EpisodePatch): Promise<Episode> {
   const r = await fetch(`/api/episodes/${id}`, {
     method: "PATCH",
     headers: authHeaders(),

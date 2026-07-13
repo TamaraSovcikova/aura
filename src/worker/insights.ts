@@ -11,6 +11,7 @@ import { medicationDays, ICHD3_THRESHOLDS, type MedMonth } from "../shared/meds"
 import { triggerAnalysis } from "./triggers";
 import { premonitionStats } from "./stats";
 import { menstrualAnalysis } from "./cycle";
+import { classifyAttack, isMigraine, type AttackAttributes } from "../shared/ichd3";
 
 export interface Insight {
   /** 'fact' = a count. 'gated' = depends on a test that reports its own power. */
@@ -30,7 +31,79 @@ export interface Summary {
   mean_peak_severity: number | null;
   medication_days: MedMonth[];
   control_days: { total: number; with_sleep: number };
+  /** Monthly Migraine Days: distinct days meeting ICHD-3 migraine criteria. The
+   *  number a neurologist reads for treatment response. Strict (probable excluded). */
+  migraine_days: number;
+  classified: {
+    attacks_with_attributes: number;
+    migraine: number;
+    probable_migraine: number;
+    tension_type: number;
+    unclassified: number;
+  };
   insights: Insight[];
+}
+
+/** Classify every app episode that has any attributes, and count Monthly Migraine
+ *  Days. Imported rows carry no attributes and never become migraine days. */
+async function classifyEpisodes(db: D1Database): Promise<{
+  migraine_days: number;
+  counts: Summary["classified"];
+}> {
+  const rows = await db
+    .prepare(
+      `SELECT local_date, started_at, ended_at, severity,
+              side, quality, aggravated_by_activity, nausea, photophobia, phonophobia, aura
+         FROM episodes
+        WHERE source = 'app'`
+    )
+    .all<Record<string, unknown>>();
+
+  const migraineDays = new Set<string>();
+  const counts = {
+    attacks_with_attributes: 0,
+    migraine: 0,
+    probable_migraine: 0,
+    tension_type: 0,
+    unclassified: 0,
+  };
+  const b = (v: unknown): boolean | null => (v == null ? null : Boolean(v));
+
+  for (const r of rows.results) {
+    const hasAny =
+      r.side != null ||
+      r.quality != null ||
+      r.aggravated_by_activity != null ||
+      r.nausea != null ||
+      r.photophobia != null ||
+      r.phonophobia != null ||
+      r.aura != null;
+    if (!hasAny) continue;
+    counts.attacks_with_attributes++;
+
+    const start = r.started_at as string;
+    const end = r.ended_at as string | null;
+    const attrs: AttackAttributes = {
+      side: (r.side as "one" | "both" | null) ?? null,
+      quality: (r.quality as "throbbing" | "pressing" | null) ?? null,
+      aggravated_by_activity: b(r.aggravated_by_activity),
+      nausea: b(r.nausea),
+      photophobia: b(r.photophobia),
+      phonophobia: b(r.phonophobia),
+      aura: b(r.aura),
+      severity: (r.severity as number | null) ?? null,
+      duration_hours: end ? (Date.parse(end) - Date.parse(start)) / 3600000 : null,
+    };
+    const v = classifyAttack(attrs).verdict;
+    if (isMigraine(v)) {
+      counts.migraine++;
+      if (r.local_date) migraineDays.add(r.local_date as string);
+    } else if (v === "probable_migraine") counts.probable_migraine++;
+    else if (v === "tension_type_consistent") counts.tension_type++;
+    else counts.unclassified++;
+  }
+
+  return { migraine_days: migraineDays.size, counts };
 }
 
 const pct = (v: number) => `${v > 0 ? "+" : ""}${v}%`;
@@ -66,6 +139,8 @@ export async function buildSummary(db: D1Database): Promise<Summary> {
     )
     .first<{ total: number; with_sleep: number }>();
 
+  const classification = await classifyEpisodes(db);
+
   const insights: Insight[] = [];
   const complete = months.filter((m) => m.complete);
 
@@ -87,6 +162,17 @@ export async function buildSummary(db: D1Database): Promise<Summary> {
       body: `${mean.toFixed(1)} headache days per complete month. The worst was ${worst.month} with ${worst.headache_days}.`,
     });
   }
+
+  // ── Migraine vs headache. Derived from ICHD-3 criteria, never self-labelled. ──
+  const cl = classification.counts;
+  insights.push({
+    kind: "gated",
+    title: "Migraine or headache?",
+    body:
+      cl.attacks_with_attributes === 0
+        ? "None of your attacks carry the symptom details yet. Add them when an attack ends (one-sided, throbbing, nausea, light and sound) and Aura will check each one against the ICHD-3 criteria, so the migraine-vs-headache call is the criteria's, not a guess."
+        : `Of ${cl.attacks_with_attributes} attacks you have described, ${cl.migraine} meet the ICHD-3 criteria for migraine, ${cl.probable_migraine} probably do, ${cl.tension_type} look tension-type, and ${cl.unclassified} do not have enough detail. That is ${classification.migraine_days} migraine days. Aura reports which criteria an attack meets; the diagnosis is your neurologist's.`,
+  });
 
   // ── Trend. Carries its own gate. ──────────────────────────────────────────
   if (trend.enough_data) {
@@ -187,6 +273,8 @@ export async function buildSummary(db: D1Database): Promise<Summary> {
     mean_peak_severity: span?.mean_sev ?? null,
     medication_days: meds,
     control_days: { total: control?.total ?? 0, with_sleep: withSleep },
+    migraine_days: classification.migraine_days,
+    classified: classification.counts,
     insights,
   };
 }

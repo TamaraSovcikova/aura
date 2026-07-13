@@ -30,6 +30,8 @@ import {
 } from "./outbox";
 import { currentTz, getCoords } from "./geo";
 import { clockHM, isoToLocalInput, localInputToIso, minusMinutes, nowIso } from "./time";
+import SymptomDetails, { type Attrs, emptyAttrs, attrsEmpty } from "./SymptomDetails";
+import { parseRegions } from "../shared/headmap";
 import Insights from "./Insights";
 import { appendTranscript, listen, supportsVoice } from "./voice";
 import {
@@ -145,6 +147,7 @@ export default function App() {
               severity: cur.severity,
               meds: cur.meds,
               note: cur.note,
+              attrs: null,
               startedSynced: true,
               endedSynced: false,
             });
@@ -307,7 +310,13 @@ export default function App() {
   const finishDetails = useCallback(
     (
       details:
-        | { severity: number | null; meds: string; note: string; ended_at: string }
+        | {
+            severity: number | null;
+            meds: string;
+            note: string;
+            ended_at: string;
+            attrs: Attrs;
+          }
         | null
     ) => {
       if (details && endPanel) {
@@ -319,6 +328,7 @@ export default function App() {
           rec.note = details.note.trim() || null;
           // She may know the attack ended earlier than she remembered to tap.
           rec.ended_at = details.ended_at;
+          rec.attrs = attrsEmpty(details.attrs) ? null : details.attrs;
           saveOutbox(list);
         }
       }
@@ -340,6 +350,14 @@ export default function App() {
           // the field never silently reopens a closed attack.
           ...(patch.ended_at ? { ended_at: patch.ended_at } : {}),
           started_at_time_known: patch.started_at_time_known ? 1 : 0,
+          // ICHD-3 attributes; side is derived server-side from the regions.
+          pain_regions: patch.attrs.pain_regions,
+          quality: patch.attrs.quality,
+          aggravated_by_activity: patch.attrs.aggravated_by_activity,
+          nausea: patch.attrs.nausea,
+          photophobia: patch.attrs.photophobia,
+          phonophobia: patch.attrs.phonophobia,
+          aura: patch.attrs.aura,
         });
         setError(null);
       } catch (e) {
@@ -591,7 +609,22 @@ interface EditPatch {
   started_at: string;
   ended_at: string | null;
   started_at_time_known: boolean;
+  attrs: Attrs;
 }
+
+const numToBool = (v: number | null | undefined): boolean | null =>
+  v == null ? null : Boolean(v);
+
+/** Read the stored episode columns back into the editable attribute shape. */
+const episodeToAttrs = (e: Episode): Attrs => ({
+  pain_regions: parseRegions(e.pain_regions),
+  quality: e.quality ?? null,
+  aggravated_by_activity: numToBool(e.aggravated_by_activity),
+  nausea: numToBool(e.nausea),
+  photophobia: numToBool(e.photophobia),
+  phonophobia: numToBool(e.phonophobia),
+  aura: numToBool(e.aura),
+});
 
 function EditPanel({
   episode,
@@ -612,6 +645,7 @@ function EditPanel({
     episode.ended_at ? isoToLocalInput(episode.ended_at) : ""
   );
   const [timeKnown, setTimeKnown] = useState(episode.started_at_time_known !== 0);
+  const [attrs, setAttrs] = useState<Attrs>(episodeToAttrs(episode));
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const startIso = localInputToIso(startInput);
@@ -629,6 +663,7 @@ function EditPanel({
       started_at: startIso,
       ended_at: endIso,
       started_at_time_known: timeKnown,
+      attrs,
     });
   };
 
@@ -719,6 +754,11 @@ function EditPanel({
         />
 
         <VoiceNoteField value={note} onChange={setNote} />
+
+        <p className="mt-5 mb-1 text-xs uppercase tracking-wide text-slate-500">
+          Symptoms
+        </p>
+        <SymptomDetails value={attrs} onChange={setAttrs} />
 
         {confirmDelete ? (
           <div className="mt-6 rounded-lg bg-rose-950/40 p-3">
@@ -909,6 +949,7 @@ function EndPanel({
     meds: string;
     note: string;
     ended_at: string;
+    attrs: Attrs;
   }) => void;
   onSkip: () => void;
 }) {
@@ -916,6 +957,8 @@ function EndPanel({
   const [meds, setMeds] = useState("");
   const [note, setNote] = useState("");
   const [endMin, setEndMin] = useState(0);
+  const [attrs, setAttrs] = useState<Attrs>(emptyAttrs());
+  const [showSymptoms, setShowSymptoms] = useState(false);
 
   const levels = SEVERITY_QUICK;
 
@@ -976,6 +1019,21 @@ function EndPanel({
 
         <VoiceNoteField value={note} onChange={setNote} />
 
+        {/* The ICHD-3 attributes. Optional and collapsed, so ending an attack stays
+            one tap, but a description is one tap away when she has the energy. */}
+        <div className="mt-4">
+          {showSymptoms ? (
+            <SymptomDetails value={attrs} onChange={setAttrs} />
+          ) : (
+            <button
+              onClick={() => setShowSymptoms(true)}
+              className="w-full rounded-lg border border-slate-700 py-2 text-sm text-slate-400"
+            >
+              Add symptom details (optional)
+            </button>
+          )}
+        </div>
+
         <div className="mt-6 flex gap-3">
           <button
             onClick={onSkip}
@@ -990,6 +1048,7 @@ function EndPanel({
                 meds,
                 note,
                 ended_at: minusMinutes(nowIso(), endMin),
+                attrs,
               })
             }
             className="flex-1 rounded-lg bg-indigo-500 py-3 text-sm font-medium text-white"

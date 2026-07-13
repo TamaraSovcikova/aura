@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Bindings } from "./db";
-import { localDate, nowIso, upsertPeakSample, validSeverity } from "./db";
+import { attributeUpdates, localDate, nowIso, upsertPeakSample, validSeverity } from "./db";
 import { mcp } from "./mcp";
 import { premonitionStats } from "./stats";
 import { backfillDays, refreshRecentDays, upsertHealthDays } from "./days";
@@ -79,17 +79,23 @@ app.post("/api/episodes/:id/end", async (c) => {
   }
   const severity = validSeverity(body.severity);
 
+  // The ICHD-3 attribute panel is optional and posts through the same call, so an
+  // end that carries a head map and symptoms writes them in one round-trip.
+  const attrs = attributeUpdates(body);
+  const sets = [
+    "ended_at = ?",
+    "severity = COALESCE(?, severity)",
+    "meds = COALESCE(?, meds)",
+    "note = COALESCE(?, note)",
+    ...attrs.sets,
+    "updated_at = ?",
+  ];
+  const vals = [endedAt, severity, body.meds ?? null, body.note ?? null, ...attrs.vals, nowIso(), id];
+
   const row = await c.env.DB.prepare(
-    `UPDATE episodes
-        SET ended_at = ?,
-            severity = COALESCE(?, severity),
-            meds     = COALESCE(?, meds),
-            note     = COALESCE(?, note),
-            updated_at = ?
-      WHERE id = ?
-      RETURNING *`
+    `UPDATE episodes SET ${sets.join(", ")} WHERE id = ? RETURNING *`
   )
-    .bind(endedAt, severity, body.meds ?? null, body.note ?? null, nowIso(), id)
+    .bind(...vals)
     .first<Episode>();
 
   if (!row) return c.json({ error: "not found" }, 404);
@@ -169,6 +175,11 @@ app.patch("/api/episodes/:id", async (c) => {
     sets.push("local_date = ?");
     vals.push(localDate(body.started_at, existing.tz));
   }
+
+  // ICHD-3 attributes and the head map, editable after the fact like everything else.
+  const attrs = attributeUpdates(body as unknown as EndBody);
+  sets.push(...attrs.sets);
+  vals.push(...attrs.vals);
 
   if (sets.length === 0) return c.json({ error: "no editable fields" }, 400);
   sets.push("updated_at = ?");

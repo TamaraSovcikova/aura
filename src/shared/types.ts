@@ -23,6 +23,17 @@ export interface Episode {
   severity: number | null; // 0..10 (peak)
   meds: string | null;
   note: string | null;
+  // --- ICHD-3 attributes (F18). All optional; null means not recorded. ---
+  /** 'one' unilateral, 'both' bilateral. Derived from the head map or set directly. */
+  side?: "one" | "both" | null;
+  quality?: "throbbing" | "pressing" | null;
+  aggravated_by_activity?: number | null; // 0 | 1
+  nausea?: number | null; // 0 | 1
+  photophobia?: number | null; // 0 | 1
+  phonophobia?: number | null; // 0 | 1
+  aura?: number | null; // 0 | 1
+  /** JSON array of painted head-map region ids (F19). Kept for redisplay only. */
+  pain_regions?: string | null;
   /** 'app' | 'obsidian-import' */
   source?: string;
   /** Imported verbatim. Never feeds the trigger engine or any classification. */
@@ -55,6 +66,16 @@ export interface EndBody {
   note?: string;
   /** Client-captured end time, used when syncing an offline log. */
   client_ended_at?: string;
+  // Optional ICHD-3 attributes captured in the post-attack panel (F18/F19).
+  side?: "one" | "both" | null;
+  quality?: "throbbing" | "pressing" | null;
+  aggravated_by_activity?: boolean | null;
+  nausea?: boolean | null;
+  photophobia?: boolean | null;
+  phonophobia?: boolean | null;
+  aura?: boolean | null;
+  /** Painted head-map region ids; `side` is derived from these when present. */
+  pain_regions?: string[] | null;
 }
 
 /** A logged period start (F13). `cycle_day` is never stored: it is derived. */
