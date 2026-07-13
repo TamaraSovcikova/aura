@@ -1,5 +1,22 @@
 @import "tailwindcss";
 
+/* Palette: a calm, sophisticated dark scheme. Neutral graphite (zinc) instead of
+ * slate's techy blue, a muted deep-teal accent instead of the loud indigo, a warm
+ * muted ember for the in-progress state, and rose kept only for the clinical alert
+ * meaning. Retuning the whole app is a matter of these two scales. */
+@theme {
+  --color-accent-300: #5fae9f;
+  --color-accent-400: #46958a;
+  --color-accent-500: #2f6f65;
+  --color-accent-600: #285e56;
+  --color-accent-700: #214d47;
+  --color-accent-900: #14302c;
+
+  --color-ember-300: #e0b878;
+  --color-ember-500: #c98b4a;
+  --color-ember-900: #4a2f18;
+}
+
 /* Atkinson Hyperlegible Next — designed by the Braille Institute for low vision.
  * A deliberate choice for a migraine app used by light-sensitive people: the most
  * legible free typeface, self-hosted (no CDN) so it works offline and inside the
@@ -39,8 +56,8 @@ html {
 
 body {
   margin: 0;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #17171a; /* neutral graphite, no blue cast */
+  color: #e4e4e7; /* zinc-200 */
   font-family: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui,
     -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent;
@@ -52,7 +69,7 @@ body {
  * rule wins over the utility layer and restores a ring only for keyboard focus, so
  * mouse/touch taps stay clean. */
 :focus-visible {
-  outline: 2px solid #818cf8; /* indigo-400 */
+  outline: 2px solid #5fae9f; /* accent-300 */
   outline-offset: 2px;
   border-radius: 4px;
 }

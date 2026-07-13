@@ -14,8 +14,8 @@ export default defineConfig({
         name: "Aura",
         short_name: "Aura",
         description: "One-tap migraine tracker",
-        theme_color: "#0f172a",
-        background_color: "#0f172a",
+        theme_color: "#17171a",
+        background_color: "#17171a",
         display: "standalone",
         start_url: "/",
         icons: [

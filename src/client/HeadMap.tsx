@@ -60,13 +60,13 @@ export default function HeadMap({
 
   return (
     <div className="flex flex-col items-center">
-      <div className="mb-2 flex gap-1 rounded-lg bg-slate-800 p-0.5 text-xs">
+      <div className="mb-2 flex gap-1 rounded-lg bg-zinc-800 p-0.5 text-xs">
         {(["front", "back"] as const).map((v) => (
           <button
             key={v}
             onClick={() => setView(v)}
             className={`flex min-h-11 items-center rounded-md px-5 capitalize transition ${
-              view === v ? "bg-slate-700 text-slate-100" : "text-slate-400"
+              view === v ? "bg-zinc-700 text-zinc-100" : "text-zinc-400"
             }`}
           >
             {v}
@@ -81,14 +81,14 @@ export default function HeadMap({
           cy={116}
           rx={68}
           ry={92}
-          className="fill-slate-800/40 stroke-slate-600"
+          className="fill-zinc-800/40 stroke-zinc-600"
           strokeWidth={1.5}
         />
         {view === "front" && (
           <>
-            <ellipse cx={78} cy={116} rx={5} ry={6} className="fill-slate-500" />
-            <ellipse cx={122} cy={116} rx={5} ry={6} className="fill-slate-500" />
-            <path d="M92 150 q8 8 16 0" className="fill-none stroke-slate-500" strokeWidth={1.5} />
+            <ellipse cx={78} cy={116} rx={5} ry={6} className="fill-zinc-500" />
+            <ellipse cx={122} cy={116} rx={5} ry={6} className="fill-zinc-500" />
+            <path d="M92 150 q8 8 16 0" className="fill-none stroke-zinc-500" strokeWidth={1.5} />
           </>
         )}
         {shapes.map((s) => {
@@ -107,7 +107,7 @@ export default function HeadMap({
               className={`cursor-pointer transition ${
                 on
                   ? "fill-rose-500/70 stroke-rose-400"
-                  : "fill-transparent stroke-slate-600 hover:fill-slate-700/40"
+                  : "fill-transparent stroke-zinc-600 hover:fill-zinc-700/40"
               }`}
               strokeWidth={1.5}
             />
@@ -115,7 +115,7 @@ export default function HeadMap({
         })}
       </svg>
 
-      <p className="mt-1 h-4 text-xs text-slate-400">
+      <p className="mt-1 h-4 text-xs text-zinc-400">
         {value.length === 0
           ? "Tap where it hurts"
           : side === "one"

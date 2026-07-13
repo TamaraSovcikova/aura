@@ -56,7 +56,7 @@ function TriToggle<T extends string>({
             // Tapping the active choice again clears it back to unrecorded.
             onClick={() => onChange(on ? null : o.val)}
             className={`flex min-h-11 flex-1 items-center justify-center rounded-lg px-3 text-sm transition ${
-              on ? "bg-indigo-500 text-white" : "bg-slate-800 text-slate-300"
+              on ? "bg-accent-500 text-white" : "bg-zinc-800 text-zinc-300"
             }`}
           >
             {o.label}
@@ -70,7 +70,7 @@ function TriToggle<T extends string>({
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mt-3">
-      <p className="mb-1 text-xs uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mb-1 text-xs uppercase tracking-wide text-zinc-400">{label}</p>
       {children}
     </div>
   );
