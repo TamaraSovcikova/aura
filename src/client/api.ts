@@ -156,6 +156,7 @@ async function fetchBlob(path: string, mime: string): Promise<string> {
 
 export const exportCsvUrl = () => fetchBlob("/api/export/episodes.csv", "text/csv");
 export const exportDoctorUrl = () => fetchBlob("/api/export/doctor", "text/html");
+export const exportObsidianUrl = () => fetchBlob("/api/export/obsidian", "text/markdown");
 
 export async function apiDelete(id: number): Promise<void> {
   const r = await fetch(`/api/episodes/${id}`, {

@@ -15,6 +15,7 @@ import {
   apiSummary,
   exportCsvUrl,
   exportDoctorUrl,
+  exportObsidianUrl,
   UnauthorizedError,
 } from "./api";
 import { cycleContext, normalizeStarts } from "../shared/cycle";
@@ -308,13 +309,19 @@ function Cards({ s }: { s: Summary }) {
 function Exports({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
 
-  const download = async (kind: "csv" | "doctor") => {
+  const download = async (kind: "csv" | "doctor" | "obsidian") => {
     setBusy(kind);
     try {
-      const url = kind === "csv" ? await exportCsvUrl() : await exportDoctorUrl();
+      const url =
+        kind === "csv"
+          ? await exportCsvUrl()
+          : kind === "obsidian"
+            ? await exportObsidianUrl()
+            : await exportDoctorUrl();
       const a = document.createElement("a");
       a.href = url;
       if (kind === "csv") a.download = "aura-episodes.csv";
+      else if (kind === "obsidian") a.download = "Aura-snapshot.md";
       else {
         a.target = "_blank";
         a.rel = "noopener";
@@ -332,7 +339,7 @@ function Exports({ onUnauthorized }: { onUnauthorized: () => void }) {
   return (
     <section>
       <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
-        For your doctor
+        Export
       </h3>
       <div className="flex gap-2">
         <button
@@ -350,8 +357,16 @@ function Exports({ onUnauthorized }: { onUnauthorized: () => void }) {
           {busy === "csv" ? "…" : "CSV"}
         </button>
       </div>
+      <button
+        disabled={busy !== null}
+        onClick={() => download("obsidian")}
+        className="mt-2 w-full rounded-lg bg-slate-800 py-2.5 text-sm text-slate-400 transition active:scale-95 disabled:opacity-50"
+      >
+        {busy === "obsidian" ? "Preparing…" : "Obsidian snapshot (.md)"}
+      </button>
       <p className="mt-2 text-xs text-slate-600">
-        The summary opens in a new tab. Print it to PDF from there.
+        The summary opens in a new tab to print to PDF. The Obsidian snapshot is a
+        read-only markdown file for your vault; re-download it to refresh.
       </p>
     </section>
   );

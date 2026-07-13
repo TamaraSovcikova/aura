@@ -8,7 +8,7 @@ import { aggregateSleepSessions, validateHealthDays } from "../shared/health";
 import { triggerAnalysis } from "./triggers";
 import { menstrualAnalysis } from "./cycle";
 import { buildSummary } from "./insights";
-import { doctorHtml, episodesCsv } from "./export";
+import { doctorHtml, episodesCsv, obsidianMarkdown } from "./export";
 import { fetchEnrichment, roundCoord } from "./enrich";
 import type { Episode, StartBody, EndBody } from "../shared/types";
 
@@ -447,6 +447,16 @@ app.get("/api/export/episodes.csv", async (c) => {
 app.get("/api/export/doctor", async (c) => {
   const page = await doctorHtml(c.env.DB);
   return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+});
+
+app.get("/api/export/obsidian", async (c) => {
+  const md = await obsidianMarkdown(c.env.DB, nowIso());
+  return new Response(md, {
+    headers: {
+      "Content-Type": "text/markdown; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="Aura-snapshot.md"',
+    },
+  });
 });
 
 app.get("/api/triggers", async (c) => c.json(await triggerAnalysis(c.env.DB)));
