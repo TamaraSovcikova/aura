@@ -42,6 +42,31 @@ describe("premonition outbox", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it("posts a queued premonition only once when two reconcile passes race", async () => {
+    // The F15 race: a launch deep-link fires onPremonition() while the initial
+    // flush effect is already running. Each pass calls loadPremOutbox() and gets
+    // its OWN copy of the outbox, so the two records are distinct objects that
+    // share a localId, and the per-record `synced` flag on one copy cannot guard
+    // the other. Without a shared guard both passes POST the same tap, producing
+    // two /api/premonitions rows with an identical felt_at.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const send = vi.fn(async () => {
+      await gate; // hold both passes in-flight at the same moment
+    });
+
+    const passes = Promise.all([
+      reconcilePremonitions([prem()], send),
+      reconcilePremonitions([prem()], send),
+    ]);
+    release();
+    const [a, b] = await passes;
+
+    expect(send).toHaveBeenCalledTimes(1); // exactly one POST, no duplicate row
+    expect(a).toEqual([]); // both passes see it synced and drop it
+    expect(b).toEqual([]);
+  });
+
   it("keeps the tap when the network fails, because it can never be reconstructed", async () => {
     const send = vi.fn(async () => {
       throw new Error("offline");

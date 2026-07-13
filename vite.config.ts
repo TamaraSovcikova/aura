@@ -29,15 +29,23 @@ export default defineConfig({
           },
         ],
         // Long-press the installed icon to log without opening and navigating.
-        // The app consumes ?action=start on load, so this is one long-press + one tap.
-        // (Premonition has no shortcut yet: its outbox sync can double-post when a
-        // reconcile races on launch, which would corrupt the premonition dataset.)
+        // The app consumes ?action=start / ?action=premonition on load, so each is
+        // one long-press + one tap. The premonition shortcut is safe now that its
+        // outbox sync is idempotent under a launch race (see premonitions.ts): a
+        // reconcile racing the shortcut can no longer double-post the tap.
         shortcuts: [
           {
             name: "Log migraine",
             short_name: "Migraine",
             description: "Start a migraine now",
             url: "/?action=start",
+            icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+          },
+          {
+            name: "Log premonition",
+            short_name: "Premonition",
+            description: "Log a feeling one's coming",
+            url: "/?action=premonition",
             icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }],
           },
         ],

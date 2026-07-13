@@ -299,18 +299,29 @@ export default function App() {
     }
   }, []);
 
-  // The home-screen shortcut (F15) opens the app at /?action=start and logs a
-  // migraine immediately. Handled at most once per launch (the module-level flag
-  // survives StrictMode's double-mount). It must not open a second attack when one is
-  // already running, and after a fresh launch the open attack may live only on the
-  // server, not yet in the local outbox, so the guard checks the server too. The
-  // async server round-trip also makes this robust to a reconcile racing on launch.
+  // The home-screen shortcuts (F15) open the app at /?action=start or
+  // /?action=premonition and log immediately, so capture is one long-press + one tap.
+  // Handled at most once per launch (the module-level flag survives StrictMode's
+  // double-mount); the two actions are mutually exclusive on any one launch.
   useEffect(() => {
     if (!pinReady || deepLinkConsumed) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("action") !== "start") return;
+    const action = new URLSearchParams(window.location.search).get("action");
+    if (action !== "start" && action !== "premonition") return;
     deepLinkConsumed = true;
     window.history.replaceState({}, "", window.location.pathname);
+
+    if (action === "premonition") {
+      // Fire-and-forget: a premonition is always logged (there is no "already
+      // open" state to guard). Its outbox sync is now idempotent under a launch
+      // race, so the tap this queues cannot be double-posted by the initial flush.
+      onPremonition();
+      return;
+    }
+
+    // A migraine must not open a second attack when one is already running, and
+    // after a fresh launch the open attack may live only on the server, not yet in
+    // the local outbox, so the guard checks the server too. The async server
+    // round-trip also makes this robust to a reconcile racing on launch.
     (async () => {
       if (findOpen(loadOutbox())) return; // already open on this device
       let serverOpen = null;
@@ -323,7 +334,7 @@ export default function App() {
       if (serverOpen || findOpen(loadOutbox())) return;
       onStart();
     })();
-  }, [pinReady, onStart]);
+  }, [pinReady, onStart, onPremonition]);
 
   const onEnd = useCallback(() => {
     const list = loadOutbox();
