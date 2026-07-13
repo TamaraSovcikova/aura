@@ -29,6 +29,7 @@ import {
   type StartFn,
 } from "./outbox";
 import { currentTz, getCoords } from "./geo";
+import { clockHM, isoToLocalInput, localInputToIso, minusMinutes, nowIso } from "./time";
 import Insights from "./Insights";
 import { appendTranscript, listen, supportsVoice } from "./voice";
 import {
@@ -41,6 +42,7 @@ import {
 const startFn: StartFn = async (e) => {
   const ep = await apiStart({
     client_started_at: e.started_at,
+    started_at_time_known: e.time_known,
     lat: e.lat ?? undefined,
     lon: e.lon ?? undefined,
     tz: e.tz ?? undefined,
@@ -136,6 +138,7 @@ export default function App() {
               serverId: cur.id,
               started_at: cur.started_at,
               ended_at: null,
+              time_known: cur.started_at_time_known !== 0,
               lat: cur.lat,
               lon: cur.lon,
               tz: cur.tz,
@@ -220,6 +223,38 @@ export default function App() {
     runSync();
   }, [runSync]);
 
+  // Backdate the open episode's start. Any adjustment is an estimate, so the time
+  // is marked not-known: the date stays exact (headache-day counts stay right) but
+  // the onset is held out of the premonition timing stat. `startedAt` is a UTC ISO;
+  // `woke` means "present on waking, onset unknown" and keeps the current instant.
+  const adjustStart = useCallback(
+    async (startedAt: string) => {
+      const list = loadOutbox();
+      const rec = findOpen(list);
+      if (!rec) return;
+      rec.started_at = startedAt;
+      rec.time_known = false;
+      saveOutbox(list);
+      setOpen({ ...rec });
+      // If the start already reached the server, correct it there too; otherwise
+      // the corrected value simply rides the initial POST when it syncs.
+      if (rec.startedSynced && rec.serverId != null) {
+        try {
+          await apiPatch(rec.serverId, {
+            started_at: startedAt,
+            started_at_time_known: 0,
+          });
+        } catch (e) {
+          if (e instanceof UnauthorizedError) {
+            setError("That PIN was rejected. Enter it again.");
+            setPinReady(false);
+          }
+        }
+      }
+    },
+    []
+  );
+
   // "I feel one coming." One tap, timestamped instantly, never asks a follow-up.
   // Queued locally first so a dead connection cannot lose it: unlike weather,
   // a premonition can never be reconstructed after the fact.
@@ -270,7 +305,11 @@ export default function App() {
   }, []);
 
   const finishDetails = useCallback(
-    (details: { severity: number | null; meds: string; note: string } | null) => {
+    (
+      details:
+        | { severity: number | null; meds: string; note: string; ended_at: string }
+        | null
+    ) => {
       if (details && endPanel) {
         const list = loadOutbox();
         const rec = list.find((x) => x.localId === endPanel.localId);
@@ -278,6 +317,8 @@ export default function App() {
           rec.severity = details.severity;
           rec.meds = details.meds.trim() || null;
           rec.note = details.note.trim() || null;
+          // She may know the attack ended earlier than she remembered to tap.
+          rec.ended_at = details.ended_at;
           saveOutbox(list);
         }
       }
@@ -288,15 +329,17 @@ export default function App() {
   );
 
   const onSaveEdit = useCallback(
-    async (
-      id: number,
-      patch: { severity: number | null; meds: string; note: string }
-    ) => {
+    async (id: number, patch: EditPatch) => {
       try {
         await apiPatch(id, {
           severity: patch.severity,
           meds: patch.meds.trim() || null,
           note: patch.note.trim() || null,
+          started_at: patch.started_at,
+          // A corrected end is optional; only send it when one is set, so clearing
+          // the field never silently reopens a closed attack.
+          ...(patch.ended_at ? { ended_at: patch.ended_at } : {}),
+          started_at_time_known: patch.started_at_time_known ? 1 : 0,
         });
         setError(null);
       } catch (e) {
@@ -365,18 +408,22 @@ export default function App() {
 
       <main className="flex flex-1 flex-col items-center justify-center gap-6">
         {open ? (
-          <button
-            onClick={onEnd}
-            className="flex aspect-square w-64 flex-col items-center justify-center rounded-full bg-amber-500/90 text-slate-950 shadow-lg shadow-amber-900/40 transition active:scale-95"
-          >
-            <span className="text-sm font-medium uppercase tracking-wide">
-              Migraine in progress
-            </span>
-            <span className="my-2 text-5xl font-bold tabular-nums">
-              {elapsed}
-            </span>
-            <span className="text-sm opacity-80">tap when it ends</span>
-          </button>
+          <div className="flex flex-col items-center gap-3">
+            <button
+              onClick={onEnd}
+              className="flex aspect-square w-64 flex-col items-center justify-center rounded-full bg-amber-500/90 text-slate-950 shadow-lg shadow-amber-900/40 transition active:scale-95"
+            >
+              <span className="text-sm font-medium uppercase tracking-wide">
+                Migraine in progress
+              </span>
+              <span className="my-2 text-5xl font-bold tabular-nums">
+                {open.time_known ? "" : "~"}
+                {elapsed}
+              </span>
+              <span className="text-sm opacity-80">tap when it ends</span>
+            </button>
+            <StartAdjust open={open} onAdjust={adjustStart} />
+          </div>
         ) : (
           <button
             onClick={onStart}
@@ -519,7 +566,9 @@ function RecentList({
               </span>
               <span className="text-slate-400 tabular-nums">
                 {e.ended_at
-                  ? formatDuration(durationMs(e.started_at, e.ended_at))
+                  ? // A "~" flags a duration built on an estimated onset.
+                    (e.started_at_time_known === 0 ? "~" : "") +
+                    formatDuration(durationMs(e.started_at, e.ended_at))
                   : e.source === "app"
                     ? "ongoing"
                     : "—" /* imported: duration unknown, not in progress */}
@@ -535,6 +584,15 @@ function RecentList({
   );
 }
 
+interface EditPatch {
+  severity: number | null;
+  meds: string;
+  note: string;
+  started_at: string;
+  ended_at: string | null;
+  started_at_time_known: boolean;
+}
+
 function EditPanel({
   episode,
   onSave,
@@ -542,33 +600,83 @@ function EditPanel({
   onCancel,
 }: {
   episode: Episode;
-  onSave: (d: { severity: number | null; meds: string; note: string }) => void;
+  onSave: (d: EditPatch) => void;
   onDelete: () => void;
   onCancel: () => void;
 }) {
   const [severity, setSeverity] = useState<number | null>(episode.severity);
   const [meds, setMeds] = useState(episode.meds ?? "");
   const [note, setNote] = useState(episode.note ?? "");
+  const [startInput, setStartInput] = useState(isoToLocalInput(episode.started_at));
+  const [endInput, setEndInput] = useState(
+    episode.ended_at ? isoToLocalInput(episode.ended_at) : ""
+  );
+  const [timeKnown, setTimeKnown] = useState(episode.started_at_time_known !== 0);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  const startIso = localInputToIso(startInput);
+  const endIso = endInput ? localInputToIso(endInput) : null;
+  // Guard against a fat-fingered edit that would make the attack end before it began.
+  const endBeforeStart = startIso !== null && endIso !== null && endIso < startIso;
+  const canSave = startIso !== null && !endBeforeStart;
 
-  const when = new Date(episode.started_at).toLocaleString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const save = () => {
+    if (!startIso) return;
+    onSave({
+      severity,
+      meds,
+      note,
+      started_at: startIso,
+      ended_at: endIso,
+      started_at_time_known: timeKnown,
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-10 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6">
-      <div className="w-full max-w-md rounded-t-2xl bg-slate-900 p-6 sm:rounded-2xl">
+      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-slate-900 p-6 sm:rounded-2xl">
         <div className="flex items-baseline justify-between">
           <h3 className="text-base font-semibold text-slate-100">Edit entry</h3>
-          <span className="text-xs text-slate-500">{when}</span>
+          <span className="text-xs text-slate-500">
+            {episode.source && episode.source !== "app" ? "imported" : "logged"}
+          </span>
         </div>
 
-        {/* Editing happens after the fact, so precision is affordable here. */}
+        {/* Editing happens after the fact, so precise times are affordable here. */}
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+          Started
+        </p>
+        <input
+          type="datetime-local"
+          value={startInput}
+          onChange={(e) => setStartInput(e.target.value)}
+          className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none"
+        />
+        <label className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+          <input
+            type="checkbox"
+            checked={timeKnown}
+            onChange={(e) => setTimeKnown(e.target.checked)}
+            className="accent-indigo-500"
+          />
+          I know the onset time (uncheck if it woke you or you noticed late)
+        </label>
+
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+          Ended
+        </p>
+        <input
+          type="datetime-local"
+          value={endInput}
+          onChange={(e) => setEndInput(e.target.value)}
+          className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none"
+        />
+        {endBeforeStart && (
+          <p className="mt-1 text-xs text-rose-400">
+            The end is before the start.
+          </p>
+        )}
+
         <div className="mt-4 mb-2 flex items-baseline justify-between">
           <p className="text-xs uppercase tracking-wide text-slate-500">
             Peak severity
@@ -645,8 +753,9 @@ function EditPanel({
               Cancel
             </button>
             <button
-              onClick={() => onSave({ severity, meds, note })}
-              className="rounded-lg bg-indigo-500 px-5 py-3 text-sm font-medium text-white"
+              onClick={save}
+              disabled={!canSave}
+              className="rounded-lg bg-indigo-500 px-5 py-3 text-sm font-medium text-white disabled:opacity-40"
             >
               Save
             </button>
@@ -724,16 +833,89 @@ function VoiceNoteField({
   );
 }
 
+/**
+ * Backdate the start of an in-progress attack. Quiet by default so it never
+ * competes with the capture button; opens only when tapped. The offset presets
+ * cover "I realised late"; "Woke with it" is the case she cannot put a time to,
+ * so it keeps the current instant and only marks the onset unknown.
+ */
+function StartAdjust({
+  open,
+  onAdjust,
+}: {
+  open: LocalEpisode;
+  onAdjust: (startedAt: string) => void;
+}) {
+  const [show, setShow] = useState(false);
+
+  const presets = [
+    { label: "30 min earlier", started: () => minusMinutes(nowIso(), 30) },
+    { label: "1 hr earlier", started: () => minusMinutes(nowIso(), 60) },
+    { label: "2 hr earlier", started: () => minusMinutes(nowIso(), 120) },
+    { label: "Woke with it", started: () => nowIso() },
+  ];
+
+  if (!show) {
+    return (
+      <button
+        onClick={() => setShow(true)}
+        className="text-xs text-slate-500 underline underline-offset-2"
+      >
+        Started {open.time_known ? clockHM(open.started_at) : "earlier"} · adjust
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="flex flex-wrap justify-center gap-2">
+        {presets.map((p) => (
+          <button
+            key={p.label}
+            onClick={() => {
+              onAdjust(p.started());
+              setShow(false);
+            }}
+            className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs text-slate-300 transition active:scale-95"
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <p className="max-w-xs text-center text-[11px] leading-relaxed text-slate-600">
+        Marks the onset as an estimate: the day stays exact, the timing is kept out
+        of the premonition analysis.
+      </p>
+      <button onClick={() => setShow(false)} className="text-xs text-slate-500">
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+const END_OFFSETS = [
+  { label: "Just now", min: 0 },
+  { label: "~30 min ago", min: 30 },
+  { label: "~1 hr ago", min: 60 },
+  { label: "~2 hr ago", min: 120 },
+];
+
 function EndPanel({
   onSave,
   onSkip,
 }: {
-  onSave: (d: { severity: number | null; meds: string; note: string }) => void;
+  onSave: (d: {
+    severity: number | null;
+    meds: string;
+    note: string;
+    ended_at: string;
+  }) => void;
   onSkip: () => void;
 }) {
   const [severity, setSeverity] = useState<number | null>(null);
   const [meds, setMeds] = useState("");
   const [note, setNote] = useState("");
+  const [endMin, setEndMin] = useState(0);
 
   const levels = SEVERITY_QUICK;
 
@@ -743,6 +925,25 @@ function EndPanel({
         <h3 className="text-base font-semibold text-slate-100">
           How was it? (optional)
         </h3>
+
+        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
+          Ended
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {END_OFFSETS.map((o) => (
+            <button
+              key={o.min}
+              onClick={() => setEndMin(o.min)}
+              className={`rounded-lg px-3 py-2 text-sm transition ${
+                endMin === o.min
+                  ? "bg-indigo-500 text-white"
+                  : "bg-slate-800 text-slate-300"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
 
         <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-slate-500">
           Severity
@@ -783,7 +984,14 @@ function EndPanel({
             Skip
           </button>
           <button
-            onClick={() => onSave({ severity, meds, note })}
+            onClick={() =>
+              onSave({
+                severity,
+                meds,
+                note,
+                ended_at: minusMinutes(nowIso(), endMin),
+              })
+            }
             className="flex-1 rounded-lg bg-indigo-500 py-3 text-sm font-medium text-white"
           >
             Save

@@ -44,6 +44,9 @@ export interface StartBody {
   tz?: string;
   /** Client-captured start time, used when syncing an offline log. */
   client_started_at?: string;
+  /** False when the start time is an estimate (backdated or woken-with). Kept out
+   *  of the premonition lead-time analysis so a guess never reads as a measurement. */
+  started_at_time_known?: boolean;
 }
 
 export interface EndBody {

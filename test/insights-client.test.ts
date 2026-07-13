@@ -35,3 +35,36 @@ describe("the day a period tap belongs to", () => {
     expect(localDateInTz(iso, "America/New_York")).toBe("2026-07-09");
   });
 });
+
+import { isoToLocalInput, localInputToIso, minusMinutes } from "../src/client/time";
+
+describe("edit-time round trip", () => {
+  it("loses no information going ISO -> datetime-local -> ISO", () => {
+    // Whatever the device zone, editing then saving must return the same instant.
+    for (const iso of [
+      "2026-07-07T10:00:00.000Z",
+      "2026-01-01T23:30:00.000Z",
+      "2026-12-31T00:15:00.000Z",
+    ]) {
+      const back = localInputToIso(isoToLocalInput(iso));
+      // datetime-local has minute precision, so compare to the minute.
+      expect(back?.slice(0, 16)).toBe(iso.slice(0, 16));
+    }
+  });
+
+  it("rejects an empty or malformed input rather than inventing a date", () => {
+    expect(localInputToIso("")).toBeNull();
+    expect(localInputToIso("not a date")).toBeNull();
+  });
+});
+
+describe("minusMinutes", () => {
+  it("subtracts the offset from an instant", () => {
+    expect(minusMinutes("2026-07-07T10:00:00.000Z", 90)).toBe("2026-07-07T08:30:00.000Z");
+    expect(minusMinutes("2026-07-07T10:00:00.000Z", 0)).toBe("2026-07-07T10:00:00.000Z");
+  });
+
+  it("crosses midnight backwards", () => {
+    expect(minusMinutes("2026-07-07T00:30:00.000Z", 60)).toBe("2026-07-06T23:30:00.000Z");
+  });
+});

@@ -40,16 +40,20 @@ app.post("/api/episodes/start", async (c) => {
   const lon = typeof body.lon === "number" ? roundCoord(body.lon) : null;
   const enr = await fetchEnrichment(body.lat, body.lon);
 
+  // Default known. Only an estimate (backdated or woken-with) sets this false.
+  const timeKnown = body.started_at_time_known === false ? 0 : 1;
+
   const row = await c.env.DB.prepare(
     `INSERT INTO episodes
        (started_at, local_date, started_at_time_known, tz, lat, lon,
         weather_code, pressure_hpa, temp_c, source)
-     VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, 'app')
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'app')
      RETURNING *`
   )
     .bind(
       startedAt,
       localDate(startedAt, tz),
+      timeKnown,
       tz,
       lat,
       lon,
@@ -131,6 +135,13 @@ app.patch("/api/episodes/:id", async (c) => {
     return c.json({ error: "severity must be an integer 0-10" }, 400);
   }
 
+  // The timezone is needed to recompute local_date when the start moves, so the
+  // row must be read before it is written.
+  const existing = await c.env.DB.prepare(`SELECT tz FROM episodes WHERE id = ?`)
+    .bind(id)
+    .first<{ tz: string | null }>();
+  if (!existing) return c.json({ error: "not found" }, 404);
+
   const editable = [
     "started_at",
     "ended_at",
@@ -146,6 +157,19 @@ app.patch("/api/episodes/:id", async (c) => {
       vals.push((body as Record<string, unknown>)[f] ?? null);
     }
   }
+
+  // A corrected start time is often an estimate, and it can cross midnight into a
+  // different headache day. Both must follow the timestamp, or a fixed onset would
+  // still be counted on the wrong day and still trusted as precise.
+  if ("started_at_time_known" in body) {
+    sets.push("started_at_time_known = ?");
+    vals.push(body.started_at_time_known ? 1 : 0);
+  }
+  if ("started_at" in body && typeof body.started_at === "string") {
+    sets.push("local_date = ?");
+    vals.push(localDate(body.started_at, existing.tz));
+  }
+
   if (sets.length === 0) return c.json({ error: "no editable fields" }, 400);
   sets.push("updated_at = ?");
   vals.push(nowIso());

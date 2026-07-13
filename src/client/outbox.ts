@@ -7,6 +7,8 @@ export interface LocalEpisode {
   serverId: number | null;
   started_at: string;
   ended_at: string | null;
+  /** False once the start has been backdated or marked woken-with: an estimate. */
+  time_known: boolean;
   lat: number | null;
   lon: number | null;
   tz: string | null;
@@ -43,6 +45,7 @@ export function newLocalEpisode(input: {
     serverId: null,
     started_at: input.started_at,
     ended_at: null,
+    time_known: true,
     lat: input.lat,
     lon: input.lon,
     tz: input.tz,
