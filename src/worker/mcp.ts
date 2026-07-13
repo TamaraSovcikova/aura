@@ -11,7 +11,7 @@
 
 import { Hono } from "hono";
 import type { Bindings } from "./db";
-import { localDate, nowIso } from "./db";
+import { checkPin, localDate, nowIso } from "./db";
 import {
   headacheDaysTrend,
   monthSeries,
@@ -33,13 +33,6 @@ const err = (id: unknown, code: number, message: string) => ({
 const json = (v: unknown) => ({
   content: [{ type: "text", text: JSON.stringify(v, null, 2) }],
 });
-
-function authorized(env: Bindings, header?: string, queryToken?: string): boolean {
-  const pin = env.ACCESS_PIN;
-  if (!pin) return true; // local dev with no secret configured
-  const token = header?.startsWith("Bearer ") ? header.slice(7) : queryToken;
-  return token === pin;
-}
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -415,9 +408,12 @@ async function handleTool(
 // ── JSON-RPC transport ───────────────────────────────────────────────────────
 
 mcp.post("/", async (c) => {
-  if (!authorized(c.env, c.req.header("Authorization"), c.req.query("token"))) {
-    return c.json(err(null, -32000, "Unauthorized"), 401);
+  const auth = checkPin(c.env.ACCESS_PIN, c.req.header("Authorization"), c.req.query("token"));
+  if (auth === "misconfigured") {
+    console.error("ACCESS_PIN is not set — refusing MCP requests. Set the secret and redeploy.");
+    return c.json(err(null, -32000, "Server misconfigured"), 503);
   }
+  if (auth === "unauthorized") return c.json(err(null, -32000, "Unauthorized"), 401);
 
   let body: { jsonrpc: string; id: unknown; method: string; params?: Record<string, unknown> };
   try {

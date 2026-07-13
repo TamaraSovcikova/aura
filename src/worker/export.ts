@@ -14,7 +14,7 @@
 import { buildSummary } from "./insights";
 import { cycleContext } from "../shared/cycle";
 import { loadPeriodStarts } from "./cycle";
-import { classifyAttack, type AttackAttributes, type Ichd3Verdict } from "../shared/ichd3";
+import { classifyAttack, rowToAttackAttributes, type Ichd3Verdict } from "../shared/ichd3";
 
 const esc = (s: unknown): string => {
   const v = s === null || s === undefined ? "" : String(s);
@@ -172,8 +172,6 @@ const VERDICT_LABEL: Record<Ichd3Verdict, string> = {
   unclassified: "",
 };
 
-const b = (v: unknown): boolean | null => (v == null ? null : Boolean(v));
-
 export async function obsidianMarkdown(db: D1Database, generated: string): Promise<string> {
   const s = await buildSummary(db);
   const rows = await db
@@ -250,19 +248,8 @@ export async function obsidianMarkdown(db: D1Database, generated: string): Promi
     const dur = end ? ((Date.parse(end) - Date.parse(start)) / 3600000).toFixed(1) : "";
     const durCell = dur && !known ? `~${dur}` : dur;
     const app = r.source === "app";
-    const attrs: AttackAttributes = {
-      side: (r.side as "one" | "both" | null) ?? null,
-      quality: (r.quality as "throbbing" | "pressing" | null) ?? null,
-      aggravated_by_activity: b(r.aggravated_by_activity),
-      nausea: b(r.nausea),
-      photophobia: b(r.photophobia),
-      phonophobia: b(r.phonophobia),
-      aura: b(r.aura),
-      severity: (r.severity as number | null) ?? null,
-      duration_hours: end ? (Date.parse(end) - Date.parse(start)) / 3600000 : null,
-    };
     // Only app episodes carry attributes; imported rows stay explicitly unassessed.
-    const verdict = app ? VERDICT_LABEL[classifyAttack(attrs).verdict] : "";
+    const verdict = app ? VERDICT_LABEL[classifyAttack(rowToAttackAttributes(r)).verdict] : "";
     const onset = known ? new Date(start).toISOString().slice(11, 16) : "~";
     return `| ${r.local_date} | ${onset} | ${cell(durCell)} | ${cell(r.severity ?? "")} | ${cell(r.side ?? "")} | ${cell(verdict)} | ${cell(r.meds ?? "")} | ${cell(r.self_reported_triggers ?? "")} | ${cell(r.note ?? "")} | ${r.source} |`;
   });

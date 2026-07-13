@@ -14,6 +14,27 @@ export type AppContext = Context<{ Bindings: Bindings }>;
 
 export const nowIso = () => new Date().toISOString();
 
+export type AuthResult = "authorized" | "unauthorized" | "misconfigured";
+
+/**
+ * Fail-closed access check, shared by the REST guard and the MCP server.
+ *
+ * A missing ACCESS_PIN denies EVERY request rather than allowing them: a health
+ * app must never serve its data unauthenticated because a secret was dropped. Both
+ * dev (.dev.vars) and prod (`wrangler secret put`) always set it, so an unset PIN
+ * only ever means a misconfigured deploy, reported distinctly from a wrong token so
+ * it stands out in logs and monitoring.
+ */
+export function checkPin(
+  pin: string | undefined,
+  header?: string,
+  queryToken?: string
+): AuthResult {
+  if (!pin) return "misconfigured";
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : queryToken;
+  return token === pin ? "authorized" : "unauthorized";
+}
+
 /**
  * The calendar day an instant falls on in `tz`. All day-based metrics (monthly
  * headache days) group by this, never by the UTC date, so a 23:00 BST attack

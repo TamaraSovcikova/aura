@@ -11,7 +11,7 @@ import { medicationDays, ICHD3_THRESHOLDS, type MedMonth } from "../shared/meds"
 import { triggerAnalysis } from "./triggers";
 import { premonitionStats } from "./stats";
 import { menstrualAnalysis } from "./cycle";
-import { classifyAttack, isMigraine, type AttackAttributes } from "../shared/ichd3";
+import { classifyAttack, isMigraine, hasAnyAttribute, rowToAttackAttributes } from "../shared/ichd3";
 
 export interface Insight {
   /** 'fact' = a count. 'gated' = depends on a test that reports its own power. */
@@ -67,34 +67,12 @@ async function classifyEpisodes(db: D1Database): Promise<{
     tension_type: 0,
     unclassified: 0,
   };
-  const b = (v: unknown): boolean | null => (v == null ? null : Boolean(v));
 
   for (const r of rows.results) {
-    const hasAny =
-      r.side != null ||
-      r.quality != null ||
-      r.aggravated_by_activity != null ||
-      r.nausea != null ||
-      r.photophobia != null ||
-      r.phonophobia != null ||
-      r.aura != null;
-    if (!hasAny) continue;
+    if (!hasAnyAttribute(r)) continue;
     counts.attacks_with_attributes++;
 
-    const start = r.started_at as string;
-    const end = r.ended_at as string | null;
-    const attrs: AttackAttributes = {
-      side: (r.side as "one" | "both" | null) ?? null,
-      quality: (r.quality as "throbbing" | "pressing" | null) ?? null,
-      aggravated_by_activity: b(r.aggravated_by_activity),
-      nausea: b(r.nausea),
-      photophobia: b(r.photophobia),
-      phonophobia: b(r.phonophobia),
-      aura: b(r.aura),
-      severity: (r.severity as number | null) ?? null,
-      duration_hours: end ? (Date.parse(end) - Date.parse(start)) / 3600000 : null,
-    };
-    const v = classifyAttack(attrs).verdict;
+    const v = classifyAttack(rowToAttackAttributes(r)).verdict;
     if (isMigraine(v)) {
       counts.migraine++;
       if (r.local_date) migraineDays.add(r.local_date as string);

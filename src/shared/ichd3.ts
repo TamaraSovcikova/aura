@@ -175,3 +175,45 @@ export function classifyAttack(a: AttackAttributes): Ichd3Result {
 export function isMigraine(v: Ichd3Verdict): boolean {
   return v === "migraine_with_aura" || v === "migraine_without_aura";
 }
+
+// ── Row → attributes, shared by the summary and the exports ──────────────────
+//
+// Both the dashboard (insights.ts) and the doctor/Obsidian exports (export.ts)
+// classify episode rows. This mapping lives here, once, so the two can never
+// report a different migraine count for the same attack.
+
+/** Coerce a nullable DB cell (0/1/null) to a tri-state boolean: null means the
+ *  attribute was never recorded, which the classifier treats as unknown. */
+export const boolOrNull = (v: unknown): boolean | null => (v == null ? null : Boolean(v));
+
+/** True when a row carries at least one ICHD-3 attribute, so it is worth
+ *  classifying. A row with none stays a headache day, never a migraine day. */
+export function hasAnyAttribute(r: Record<string, unknown>): boolean {
+  return (
+    r.side != null ||
+    r.quality != null ||
+    r.aggravated_by_activity != null ||
+    r.nausea != null ||
+    r.photophobia != null ||
+    r.phonophobia != null ||
+    r.aura != null
+  );
+}
+
+/** Build the classifier's input from an episodes row. Duration is derived from
+ *  started_at/ended_at only when both are present (imported rows have no end). */
+export function rowToAttackAttributes(r: Record<string, unknown>): AttackAttributes {
+  const start = r.started_at as string | null;
+  const end = r.ended_at as string | null;
+  return {
+    side: (r.side as "one" | "both" | null) ?? null,
+    quality: (r.quality as "throbbing" | "pressing" | null) ?? null,
+    aggravated_by_activity: boolOrNull(r.aggravated_by_activity),
+    nausea: boolOrNull(r.nausea),
+    photophobia: boolOrNull(r.photophobia),
+    phonophobia: boolOrNull(r.phonophobia),
+    aura: boolOrNull(r.aura),
+    severity: (r.severity as number | null) ?? null,
+    duration_hours: start && end ? (Date.parse(end) - Date.parse(start)) / 3600000 : null,
+  };
+}

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Bindings } from "./db";
-import { attributeUpdates, localDate, nowIso, upsertPeakSample, validSeverity } from "./db";
+import { attributeUpdates, checkPin, localDate, nowIso, upsertPeakSample, validSeverity } from "./db";
 import { mcp } from "./mcp";
 import { premonitionStats } from "./stats";
 import { backfillDays, refreshRecentDays, upsertHealthDays } from "./days";
@@ -15,15 +15,16 @@ import type { Episode, StartBody, EndBody } from "../shared/types";
 const app = new Hono<{ Bindings: Bindings }>();
 
 // --- Access guard ----------------------------------------------------------
-// Every /api route except /api/health requires the bearer PIN, when one is set.
+// Every /api route except /api/health requires the bearer PIN. Fail-closed: if the
+// secret is missing the API refuses to serve rather than exposing health data.
 app.use("/api/*", async (c, next) => {
   if (c.req.path === "/api/health") return next();
-  const pin = c.env.ACCESS_PIN;
-  if (pin) {
-    const header = c.req.header("Authorization") ?? "";
-    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-    if (token !== pin) return c.json({ error: "unauthorized" }, 401);
+  const auth = checkPin(c.env.ACCESS_PIN, c.req.header("Authorization"));
+  if (auth === "misconfigured") {
+    console.error("ACCESS_PIN is not set — refusing all API requests. Set the secret and redeploy.");
+    return c.json({ error: "server misconfigured" }, 503);
   }
+  if (auth === "unauthorized") return c.json({ error: "unauthorized" }, 401);
   return next();
 });
 

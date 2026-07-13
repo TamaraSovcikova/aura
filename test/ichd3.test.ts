@@ -141,3 +141,41 @@ describe("classifyAttack", () => {
     expect(isMigraine(r.verdict)).toBe(false); // probable does NOT count toward MMD
   });
 });
+
+import { boolOrNull, hasAnyAttribute, rowToAttackAttributes } from "../src/shared/ichd3";
+
+describe("rowToAttackAttributes (shared by summary + exports)", () => {
+  it("coerces 0/1/null DB cells to a tri-state boolean", () => {
+    expect(boolOrNull(1)).toBe(true);
+    expect(boolOrNull(0)).toBe(false);
+    expect(boolOrNull(null)).toBeNull();
+    expect(boolOrNull(undefined)).toBeNull();
+  });
+
+  it("detects whether a row carries any attribute worth classifying", () => {
+    expect(hasAnyAttribute({ side: null, quality: null, nausea: null })).toBe(false);
+    expect(hasAnyAttribute({ side: "one" })).toBe(true);
+    expect(hasAnyAttribute({ nausea: 0 })).toBe(true); // a recorded "no" still counts
+  });
+
+  it("maps a row and derives duration only when both ends exist", () => {
+    const withEnd = rowToAttackAttributes({
+      started_at: "2026-07-02T09:00:00.000Z",
+      ended_at: "2026-07-02T15:00:00.000Z",
+      severity: 8,
+      side: "one",
+      quality: "throbbing",
+      nausea: 1,
+      photophobia: 0,
+      aura: null,
+    });
+    expect(withEnd.duration_hours).toBe(6);
+    expect(withEnd.side).toBe("one");
+    expect(withEnd.nausea).toBe(true);
+    expect(withEnd.photophobia).toBe(false);
+    expect(withEnd.aura).toBeNull();
+
+    const noEnd = rowToAttackAttributes({ started_at: "2026-07-02T09:00:00.000Z", ended_at: null });
+    expect(noEnd.duration_hours).toBeNull(); // imported row: no duration
+  });
+});
