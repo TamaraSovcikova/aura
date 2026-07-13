@@ -31,6 +31,12 @@ body,
   height: 100%;
 }
 
+/* A dark app: tell the browser so native controls (the date picker, the checkbox,
+ * scrollbars) render dark instead of clashing light-on-dark. */
+html {
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
   background: #0f172a;
@@ -39,4 +45,27 @@ body {
     -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+}
+
+/* Keyboard focus must be visible. The inputs set Tailwind's `outline-none`, which
+ * would leave keyboard users with no focus indicator (WCAG 2.4.7). This unlayered
+ * rule wins over the utility layer and restores a ring only for keyboard focus, so
+ * mouse/touch taps stay clean. */
+:focus-visible {
+  outline: 2px solid #818cf8; /* indigo-400 */
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Migraine and motion sensitivity travel together, so honour the OS setting and
+ * strip animation for anyone who asked for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
