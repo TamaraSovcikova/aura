@@ -293,3 +293,76 @@ export function mantelHaenszelOR(tables: Table2x2[]): OddsRatioResult {
     p: twoSidedP(lnOr / se),
   };
 }
+
+// ── Categorical + circular tests (day-of-week and time-of-day patterns) ──────
+
+/** Upper-tail chi-square p-value via the Wilson-Hilferty normal approximation.
+ *  Accurate to a few decimals for df >= 1 and avoids shipping an incomplete-gamma. */
+export function chiSquarePValue(chi2: number, df: number): number {
+  if (chi2 <= 0 || df <= 0) return 1;
+  const t = Math.cbrt(chi2 / df);
+  const m = 1 - 2 / (9 * df);
+  const s = Math.sqrt(2 / (9 * df));
+  return Math.min(1, Math.max(0, 1 - normalCdf((t - m) / s)));
+}
+
+export interface Contingency {
+  chi2: number;
+  df: number;
+  p: number;
+  /** Smallest expected cell count. Chi-square is unreliable below ~5. */
+  min_expected: number;
+}
+
+/** Chi-square test of independence on an R×C contingency table. */
+export function chiSquareContingency(rows: number[][]): Contingency {
+  const R = rows.length;
+  const C = rows[0]?.length ?? 0;
+  const rowTot = rows.map((r) => r.reduce((a, b) => a + b, 0));
+  const colTot = Array.from({ length: C }, (_, j) => rows.reduce((a, r) => a + r[j], 0));
+  const grand = rowTot.reduce((a, b) => a + b, 0);
+  let chi2 = 0;
+  let minE = Infinity;
+  for (let i = 0; i < R; i++) {
+    for (let j = 0; j < C; j++) {
+      const E = grand ? (rowTot[i] * colTot[j]) / grand : 0;
+      minE = Math.min(minE, E);
+      if (E > 0) chi2 += (rows[i][j] - E) ** 2 / E;
+    }
+  }
+  const df = Math.max(1, (R - 1) * (C - 1));
+  return { chi2, df, p: chiSquarePValue(chi2, df), min_expected: minE === Infinity ? 0 : minE };
+}
+
+export interface RayleighResult {
+  n: number;
+  /** Mean direction in radians; NaN when n = 0. */
+  mean_angle: number;
+  /** Mean resultant length, 0 (uniform) to 1 (all identical). */
+  resultant: number;
+  z: number;
+  p: number;
+}
+
+/**
+ * Rayleigh test for a preferred direction on a circle. Time of day is circular
+ * (23:00 is close to 01:00), so a bin-and-chi-square would mis-handle the wrap;
+ * this tests directly whether onset times cluster around any hour. Angles are in
+ * radians (hour / 24 * 2π). Uses Zar's small-sample p-value correction.
+ */
+export function rayleighTest(anglesRad: number[]): RayleighResult {
+  const n = anglesRad.length;
+  if (n === 0) return { n: 0, mean_angle: NaN, resultant: 0, z: 0, p: 1 };
+  let C = 0;
+  let S = 0;
+  for (const a of anglesRad) {
+    C += Math.cos(a);
+    S += Math.sin(a);
+  }
+  const resultant = Math.sqrt(C * C + S * S) / n;
+  const z = n * resultant * resultant;
+  const p =
+    Math.exp(-z) *
+    (1 + (2 * z - z * z) / (4 * n) - (24 * z - 132 * z * z + 76 * z ** 3 - 9 * z ** 4) / (288 * n * n));
+  return { n, mean_angle: Math.atan2(S, C), resultant, z, p: Math.min(1, Math.max(0, p)) };
+}

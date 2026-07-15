@@ -12,10 +12,12 @@ import {
   apiCycleDelete,
   apiCycleList,
   apiLogPeriod,
+  apiPatterns,
   apiSummary,
   exportCsvUrl,
   exportDoctorUrl,
   exportObsidianUrl,
+  type Patterns as PatternsData,
   UnauthorizedError,
 } from "./api";
 import { cycleContext, normalizeStarts } from "../shared/cycle";
@@ -40,13 +42,15 @@ const monthLabel = (m: string) =>
 export default function Insights({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [cycle, setCycle] = useState<CycleEvent[]>([]);
+  const [patterns, setPatterns] = useState<PatternsData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [s, c] = await Promise.all([apiSummary(), apiCycleList()]);
+      const [s, c, p] = await Promise.all([apiSummary(), apiCycleList(), apiPatterns()]);
       setSummary(s);
       setCycle(c);
+      setPatterns(p);
       setError(null);
     } catch (e) {
       if (e instanceof UnauthorizedError) return onUnauthorized();
@@ -73,6 +77,7 @@ export default function Insights({ onUnauthorized }: { onUnauthorized: () => voi
       <Header s={summary} />
       <MonthChart s={summary} />
       <MigraineVsHeadache s={summary} />
+      {patterns && <Patterns p={patterns} />}
       <MedTable s={summary} />
       <CycleCard events={cycle} onChange={load} onUnauthorized={onUnauthorized} />
       <StillLearning s={summary} />
@@ -314,6 +319,50 @@ function MigraineVsHeadache({ s }: { s: Summary }) {
           </p>
         </>
       )}
+    </section>
+  );
+}
+
+/** When they happen: day-of-week and time-of-day, both on data already captured.
+ *  A tiny weekday bar plus a one-line verdict each; nothing shouts. */
+function Patterns({ p }: { p: PatternsData }) {
+  const dow = p.day_of_week;
+  const tod = p.time_of_day;
+  const maxRate = Math.max(0.01, ...dow.per_day.map((d) => d.rate ?? 0));
+  return (
+    <section>
+      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
+        When they happen
+      </h3>
+
+      <div className="flex items-end gap-1.5">
+        {dow.per_day.map((d) => (
+          <div key={d.day} className="flex flex-1 flex-col items-center gap-1">
+            <div className="flex h-16 w-full items-end">
+              <div
+                className="w-full rounded-t bg-accent-500/80"
+                style={{ height: `${((d.rate ?? 0) / maxRate) * 100}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-zinc-400">{d.day.slice(0, 1)}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-zinc-400">
+        {dow.verdict === "insufficient data"
+          ? "Day of week: not enough days yet."
+          : dow.verdict === "possible pattern"
+            ? "Headache days lean toward some weekdays more than others (an association, not a cause)."
+            : "No weekday carries more headache days than another."}
+      </p>
+
+      <p className="mt-3 text-xs text-zinc-400">
+        {tod.verdict === "insufficient data"
+          ? `Time of day: needs 20 attacks with a known onset (${tod.known_onset_attacks} so far).`
+          : tod.verdict === "possible pattern"
+            ? `Attacks tend to start around ${tod.peak_hour} (${tod.known_onset_attacks} with a known onset).`
+            : `No time of day stands out, across ${tod.known_onset_attacks} attacks with a known onset.`}
+      </p>
     </section>
   );
 }

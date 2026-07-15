@@ -3,6 +3,12 @@ import type { Episode, StartBody, EndBody, CycleEvent } from "../shared/types";
 // server's own return type means the client cannot drift from what /api/summary
 // actually sends.
 import type { Summary } from "../worker/insights";
+import type { DayOfWeekAnalysis, TimeOfDayAnalysis } from "../worker/patterns";
+
+export interface Patterns {
+  day_of_week: DayOfWeekAnalysis;
+  time_of_day: TimeOfDayAnalysis;
+}
 
 const PIN_KEY = "aura_pin";
 
@@ -116,6 +122,11 @@ export async function apiPremonitionCount(): Promise<number> {
 export async function apiSummary(): Promise<Summary> {
   const r = await fetch("/api/summary", { headers: authHeaders() });
   return parse<Summary>(r, "summary");
+}
+
+export async function apiPatterns(): Promise<Patterns> {
+  const r = await fetch("/api/patterns", { headers: authHeaders() });
+  return parse<Patterns>(r, "patterns");
 }
 
 export async function apiCycleList(): Promise<CycleEvent[]> {

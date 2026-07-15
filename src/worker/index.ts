@@ -6,6 +6,7 @@ import { premonitionStats } from "./stats";
 import { backfillDays, refreshRecentDays, upsertHealthDays } from "./days";
 import { aggregateSleepSessions, validateHealthDays } from "../shared/health";
 import { triggerAnalysis } from "./triggers";
+import { dayOfWeekAnalysis, timeOfDayAnalysis } from "./patterns";
 import { menstrualAnalysis } from "./cycle";
 import { buildSummary } from "./insights";
 import { doctorHtml, episodesCsv, obsidianMarkdown } from "./export";
@@ -461,6 +462,13 @@ app.get("/api/export/obsidian", async (c) => {
 });
 
 app.get("/api/triggers", async (c) => c.json(await triggerAnalysis(c.env.DB)));
+
+app.get("/api/patterns", async (c) =>
+  c.json({
+    day_of_week: await dayOfWeekAnalysis(c.env.DB),
+    time_of_day: await timeOfDayAnalysis(c.env.DB),
+  })
+);
 
 // --- MCP server ------------------------------------------------------------
 // Mounted before the SPA fallback so /mcp is never swallowed by index.html.

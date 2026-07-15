@@ -20,6 +20,7 @@ import {
 } from "./stats";
 import { beliefVsData, premonitionConversion, triggerAnalysis } from "./triggers";
 import { menstrualAnalysis } from "./cycle";
+import { dayOfWeekAnalysis, timeOfDayAnalysis } from "./patterns";
 import { buildSummary } from "./insights";
 
 export const mcp = new Hono<{ Bindings: Bindings }>();
@@ -153,6 +154,18 @@ const TOOLS = [
     description:
       "The dashboard in one call: monthly headache days (with `complete` flags), the quarter-on-quarter trend, severity distribution, acute-medication days per month with the ICHD-3 day counts, control-day coverage, Monthly Migraine Days (`migraine_days`) plus the `classified` breakdown, and the deterministic insight cards. " +
       "`migraine_days` counts only app attacks whose recorded symptoms meet the ICHD-3 migraine criteria; the imported diary carries no symptoms and is never classified, so it contributes to headache days only. Each card carries `kind`: 'fact' is a count, 'gated' depends on a statistical test that reports its own power.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "day_of_week",
+    description:
+      "Does the day of the week matter? A chi-square test of whether headache incidence depends on the weekday, over every backfilled day. Returns per-day headache rates and a `verdict`. Not stratified, because weekday is near-independent of season and place. Read the `verdict`, not the raw p.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "time_of_day",
+    description:
+      "Do attacks cluster at a time of day? A Rayleigh test (time is circular) over attacks with a KNOWN onset time only; estimated and woken-with onsets are excluded so they cannot invent a spike. Returns the `peak_hour`, a per-period breakdown, and a `verdict`.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -371,6 +384,12 @@ async function handleTool(
 
     case "menstrual_analysis":
       return json(await menstrualAnalysis(db));
+
+    case "day_of_week":
+      return json(await dayOfWeekAnalysis(db));
+
+    case "time_of_day":
+      return json(await timeOfDayAnalysis(db));
 
     case "log_period_start": {
       const date = (args.local_date as string | undefined) ?? localDate(nowIso(), "Europe/Berlin");
