@@ -299,6 +299,43 @@ describe("doctorHtml", () => {
     const html = await doctorHtml(d1);
     expect(html).not.toContain("<script>alert(1)</script>");
   });
+
+  it("summarises logged medication doses with relief rate and time", async () => {
+    const ep = await d1
+      .prepare(
+        `INSERT INTO episodes (started_at, local_date, started_at_time_known, source, severity)
+         VALUES ('2026-03-02T08:00:00.000Z','2026-03-02',1,'app',7) RETURNING id`
+      )
+      .first<{ id: number }>();
+    // Three doses, two relieved at 30/60 min; enough to clear the 3-dose floor.
+    const seed = (taken: string, relief: string | null, resid: number | null) =>
+      d1
+        .prepare(
+          `INSERT INTO med_doses (episode_id, name, taken_at, relief_at, relief_severity)
+           VALUES (?, 'Sumatriptan', ?, ?, ?)`
+        )
+        .bind(ep!.id, taken, relief, resid)
+        .run();
+    await seed("2026-03-02T09:00:00Z", "2026-03-02T09:30:00Z", 0);
+    await seed("2026-03-03T09:00:00Z", "2026-03-03T10:00:00Z", 2);
+    await seed("2026-03-04T09:00:00Z", null, null);
+    const html = await doctorHtml(d1);
+    expect(html).toContain("<h2>Medication response</h2>");
+    expect(html).toMatch(/2 of 3 logged doses brought relief/);
+    expect(html).toContain("Sumatriptan");
+  });
+
+  it("notes when there are too few doses to summarise medication response", async () => {
+    await d1
+      .prepare(
+        `INSERT INTO episodes (started_at, local_date, started_at_time_known, source, severity)
+         VALUES ('2026-03-02T08:00:00.000Z','2026-03-02',1,'app',7)`
+      )
+      .run();
+    const html = await doctorHtml(d1);
+    expect(html).toContain("<h2>Medication response</h2>");
+    expect(html).toMatch(/dose/i);
+  });
 });
 
 describe("cycle routes", () => {

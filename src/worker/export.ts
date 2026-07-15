@@ -12,9 +12,14 @@
 // not diagnose.
 
 import { buildSummary } from "./insights";
+import { medicationResponse, type MedResponseGroup } from "./meds";
 import { cycleContext } from "../shared/cycle";
 import { loadPeriodStarts } from "./cycle";
 import { classifyAttack, rowToAttackAttributes, type Ichd3Verdict } from "../shared/ichd3";
+
+/** "45 min" / "1.5 hr" / "-" — how the doctor sheet phrases a time-to-relief. */
+const fmtMinutes = (mins: number | null): string =>
+  mins === null ? "-" : mins < 90 ? `${Math.round(mins)} min` : `${(mins / 60).toFixed(1)} hr`;
 
 const esc = (s: unknown): string => {
   const v = s === null || s === undefined ? "" : String(s);
@@ -69,6 +74,7 @@ export async function episodesCsv(db: D1Database): Promise<string> {
 
 export async function doctorHtml(db: D1Database): Promise<string> {
   const s = await buildSummary(db);
+  const medResp = await medicationResponse(db);
   const complete = s.months.filter((m) => m.complete);
   const meanMhd = complete.length
     ? (complete.reduce((a, m) => a + m.headache_days, 0) / complete.length).toFixed(1)
@@ -99,6 +105,30 @@ export async function doctorHtml(db: D1Database): Promise<string> {
         )
         .join("")
     : `<tr><td colspan="5">No medication entries recorded.</td></tr>`;
+
+  // Medication response: only ever rendered from doses she logged in-app, with the
+  // same honesty as the app (a dose with no relief counts as one that did not work;
+  // times come only from doses that reached relief). The imported diary has none.
+  const medResponseSection = (() => {
+    if (medResp.verdict !== "summary") {
+      return `<p>${html(medResp.message)}</p>`;
+    }
+    const o = medResp.overall;
+    const pct = Math.round(o.relief_rate * 100);
+    const groupRow = (g: MedResponseGroup) => `<tr>
+        <td>${html(g.medication ?? "All doses")}</td>
+        <td class="num">${g.doses}</td>
+        <td class="num">${g.doses_with_relief} (${Math.round(g.relief_rate * 100)}%)</td>
+        <td class="num">${fmtMinutes(g.median_minutes_to_relief)}</td>
+        <td class="num">${g.median_residual ?? "-"}</td>
+      </tr>`;
+    const rows = [o, ...medResp.by_medication].map(groupRow).join("");
+    return `<p>${o.doses_with_relief} of ${o.doses} logged doses brought relief (<strong>${pct}%</strong>). Median time to relief <strong>${fmtMinutes(o.median_minutes_to_relief)}</strong>${
+      o.median_residual != null ? `, median residual pain <strong>${o.median_residual}/10</strong>` : ""
+    }.</p>
+<table><thead><tr><th>Medication</th><th class="num">Doses</th><th class="num">Brought relief</th><th class="num">Median time to relief</th><th class="num">Median residual /10</th></tr></thead>
+<tbody>${rows}</tbody></table>`;
+  })();
 
   const trendLine =
     s.trend.enough_data
@@ -137,6 +167,10 @@ export async function doctorHtml(db: D1Database): Promise<string> {
 <p class="sub">ICHD-3 medication-overuse thresholds: triptans/ergots/opioids/combination on &ge;10 days per month, simple analgesics on &ge;15, sustained for more than 3 months. Counts shown in red reached the day count for that class in that month. This is information for a clinician, not a diagnosis.</p>
 <table><thead><tr><th>Month</th><th class="num">Any medication</th><th class="num">Triptan</th><th class="num">Simple analgesic</th><th class="num">Unclassified</th></tr></thead>
 <tbody>${medRows}</tbody></table>
+
+<h2>Medication response</h2>
+<p class="sub">From doses logged in-app during an attack, with an optional "felt better" follow-up. A dose with no relief recorded counts as one that did not bring relief; times are computed only from doses that did. Not every attack has a logged dose, and the imported diary has none.</p>
+${medResponseSection}
 
 <h2>Notes</h2>
 <ul>
