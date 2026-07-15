@@ -1,9 +1,18 @@
-import type { Episode, StartBody, EndBody, CycleEvent } from "../shared/types";
+import type {
+  Episode,
+  StartBody,
+  EndBody,
+  CycleEvent,
+  MedDose,
+  DoseBody,
+  ReliefBody,
+} from "../shared/types";
 // Type-only: erased at build, so no worker code reaches the bundle. Importing the
 // server's own return type means the client cannot drift from what /api/summary
 // actually sends.
 import type { Summary } from "../worker/insights";
 import type { DayOfWeekAnalysis, TimeOfDayAnalysis } from "../worker/patterns";
+import type { MedResponse } from "../worker/meds";
 
 export interface Patterns {
   day_of_week: DayOfWeekAnalysis;
@@ -127,6 +136,39 @@ export async function apiSummary(): Promise<Summary> {
 export async function apiPatterns(): Promise<Patterns> {
   const r = await fetch("/api/patterns", { headers: authHeaders() });
   return parse<Patterns>(r, "patterns");
+}
+
+// --- Medication doses ------------------------------------------------------
+
+/** Log a dose against an episode; resolves to the new dose's server id. */
+export async function apiLogDose(episodeId: number, body: DoseBody): Promise<number> {
+  const r = await fetch(`/api/episodes/${episodeId}/meds`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  const dose = await parse<MedDose>(r, "log dose");
+  return dose.id;
+}
+
+/** Record that a logged dose brought relief (when + residual level). */
+export async function apiLogRelief(doseId: number, body: ReliefBody): Promise<void> {
+  const r = await fetch(`/api/meds/${doseId}/relief`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  await parse<MedDose>(r, "log relief");
+}
+
+export async function apiListDoses(episodeId: number): Promise<MedDose[]> {
+  const r = await fetch(`/api/episodes/${episodeId}/meds`, { headers: authHeaders() });
+  return parse<MedDose[]>(r, "list doses");
+}
+
+export async function apiMedResponse(): Promise<MedResponse> {
+  const r = await fetch("/api/meds/response", { headers: authHeaders() });
+  return parse<MedResponse>(r, "med response");
 }
 
 export async function apiCycleList(): Promise<CycleEvent[]> {

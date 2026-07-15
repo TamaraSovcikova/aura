@@ -20,6 +20,7 @@ import {
 } from "./stats";
 import { beliefVsData, premonitionConversion, triggerAnalysis } from "./triggers";
 import { menstrualAnalysis } from "./cycle";
+import { medicationResponse } from "./meds";
 import { dayOfWeekAnalysis, timeOfDayAnalysis } from "./patterns";
 import { buildSummary } from "./insights";
 
@@ -166,6 +167,13 @@ const TOOLS = [
     name: "time_of_day",
     description:
       "Do attacks cluster at a time of day? A Rayleigh test (time is circular) over attacks with a KNOWN onset time only; estimated and woken-with onsets are excluded so they cannot invent a spike. Returns the `peak_hour`, a per-period breakdown, and a `verdict`.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "medication_response",
+    description:
+      "How well does her acute medication work? Counts and medians over logged doses: the relief rate (doses that brought relief / all logged doses), the median minutes from dose to relief, and the median residual pain (0-10) it pulled down to, overall and per named medication (>=3 doses). " +
+      "A dose with NO relief logged is kept and counted as one that did not help; time-to-relief is computed only from doses that reached relief, never zero-filled. Below 3 doses it returns 'insufficient data'. Read the `verdict` and `message`.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -381,6 +389,9 @@ async function handleTool(
 
     case "summary":
       return json(await buildSummary(db));
+
+    case "medication_response":
+      return json(await medicationResponse(db));
 
     case "menstrual_analysis":
       return json(await menstrualAnalysis(db));

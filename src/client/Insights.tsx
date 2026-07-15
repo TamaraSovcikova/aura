@@ -12,6 +12,7 @@ import {
   apiCycleDelete,
   apiCycleList,
   apiLogPeriod,
+  apiMedResponse,
   apiPatterns,
   apiSummary,
   exportCsvUrl,
@@ -20,6 +21,7 @@ import {
   type Patterns as PatternsData,
   UnauthorizedError,
 } from "./api";
+import type { MedResponse } from "../worker/meds";
 import { cycleContext, normalizeStarts } from "../shared/cycle";
 import { localDateInTz } from "../shared/health";
 import { currentTz } from "./geo";
@@ -43,14 +45,21 @@ export default function Insights({ onUnauthorized }: { onUnauthorized: () => voi
   const [summary, setSummary] = useState<Summary | null>(null);
   const [cycle, setCycle] = useState<CycleEvent[]>([]);
   const [patterns, setPatterns] = useState<PatternsData | null>(null);
+  const [meds, setMeds] = useState<MedResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [s, c, p] = await Promise.all([apiSummary(), apiCycleList(), apiPatterns()]);
+      const [s, c, p, m] = await Promise.all([
+        apiSummary(),
+        apiCycleList(),
+        apiPatterns(),
+        apiMedResponse(),
+      ]);
       setSummary(s);
       setCycle(c);
       setPatterns(p);
+      setMeds(m);
       setError(null);
     } catch (e) {
       if (e instanceof UnauthorizedError) return onUnauthorized();
@@ -78,6 +87,7 @@ export default function Insights({ onUnauthorized }: { onUnauthorized: () => voi
       <MonthChart s={summary} />
       <MigraineVsHeadache s={summary} />
       {patterns && <Patterns p={patterns} />}
+      {meds && meds.verdict === "summary" && <MedResponseCard m={meds} />}
       <MedTable s={summary} />
       <CycleCard events={cycle} onChange={load} onUnauthorized={onUnauthorized} />
       <StillLearning s={summary} />
@@ -207,6 +217,64 @@ function MedTable({ s }: { s: Summary }) {
       <p className="mt-2 text-xs text-zinc-400">
         Red flags an ICHD-3 overuse day count (triptans 10, analgesics 15). Sustained
         past three months, worth showing a neurologist.
+      </p>
+    </section>
+  );
+}
+
+function MedResponseCard({ m }: { m: MedResponse }) {
+  const o = m.overall;
+  const pct = Math.round(o.relief_rate * 100);
+  const minsLabel = (mins: number) =>
+    mins < 90 ? `${Math.round(mins)} min` : `${(mins / 60).toFixed(1)} hr`;
+  return (
+    <section>
+      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-400">
+        Does the medication work?
+      </h3>
+      <div className="flex gap-3">
+        <div className="flex-1 rounded-xl bg-zinc-900/60 p-3">
+          <p className="text-2xl font-semibold tabular-nums text-zinc-100">{pct}%</p>
+          <p className="text-xs text-zinc-400">of {o.doses} doses brought relief</p>
+        </div>
+        <div className="flex-1 rounded-xl bg-zinc-900/60 p-3">
+          <p className="text-2xl font-semibold tabular-nums text-zinc-100">
+            {o.median_minutes_to_relief == null ? "–" : minsLabel(o.median_minutes_to_relief)}
+          </p>
+          <p className="text-xs text-zinc-400">
+            typical time to relief
+            {o.median_residual != null ? `, down to ${o.median_residual}/10` : ""}
+          </p>
+        </div>
+      </div>
+      {m.by_medication.length > 1 && (
+        <table className="mt-3 w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-zinc-400">
+              <th className="pb-1 font-normal">Medication</th>
+              <th className="pb-1 text-right font-normal">Doses</th>
+              <th className="pb-1 text-right font-normal">Worked</th>
+              <th className="pb-1 text-right font-normal">Time</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800">
+            {m.by_medication.map((g) => (
+              <tr key={g.medication}>
+                <td className="py-1.5 text-zinc-300">{g.medication}</td>
+                <td className="py-1.5 text-right tabular-nums text-zinc-300">{g.doses}</td>
+                <td className="py-1.5 text-right tabular-nums text-zinc-300">
+                  {Math.round(g.relief_rate * 100)}%
+                </td>
+                <td className="py-1.5 text-right tabular-nums text-zinc-300">
+                  {g.median_minutes_to_relief == null ? "–" : minsLabel(g.median_minutes_to_relief)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="mt-2 text-xs text-zinc-400">
+        A dose with no "I feel better" logged counts as one that did not help.
       </p>
     </section>
   );

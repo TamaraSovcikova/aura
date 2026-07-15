@@ -78,6 +78,31 @@ export interface EndBody {
   pain_regions?: string[] | null;
 }
 
+/** A medication dose taken during an attack. `relief_at`/`relief_severity` stay
+ *  null until she taps "I feel better": that gap is the signal a dose did nothing. */
+export interface MedDose {
+  id: number;
+  episode_id: number;
+  name: string | null;
+  taken_at: string; // ISO 8601 UTC
+  relief_at: string | null; // ISO 8601 UTC, null while no relief recorded
+  relief_severity: number | null; // 0..10 residual, null until relief recorded
+  created_at: string;
+}
+
+/** Log a dose. `name` is optional (a fast tap need not name the pill); `taken_at`
+ *  lets an offline log carry the real time it was taken, not the sync time. */
+export interface DoseBody {
+  name?: string | null;
+  client_taken_at?: string;
+}
+
+/** Record that a logged dose brought relief: when, and to what residual level. */
+export interface ReliefBody {
+  relief_severity?: number | null;
+  client_relief_at?: string;
+}
+
 /** A logged period start (F13). `cycle_day` is never stored: it is derived. */
 export interface CycleEvent {
   id: number;

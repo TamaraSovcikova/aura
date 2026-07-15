@@ -11,6 +11,8 @@ import {
   apiDelete,
   apiEnd,
   apiList,
+  apiLogDose,
+  apiLogRelief,
   apiPatch,
   apiPremonition,
   apiStart,
@@ -21,11 +23,14 @@ import {
 import {
   findOpen,
   loadOutbox,
+  newLocalDose,
   newLocalEpisode,
   reconcile,
   saveOutbox,
   type LocalEpisode,
+  type DoseFn,
   type EndFn,
+  type ReliefFn,
   type StartFn,
 } from "./outbox";
 import { currentTz, getCoords } from "./geo";
@@ -55,6 +60,9 @@ const startFn: StartFn = async (e) => {
 const endFn: EndFn = async (serverId, body) => {
   await apiEnd(serverId, body);
 };
+
+const doseFn: DoseFn = async (episodeServerId, body) => apiLogDose(episodeServerId, body);
+const reliefFn: ReliefFn = async (doseServerId, body) => apiLogRelief(doseServerId, body);
 
 const sendPremFn = async (p: {
   felt_at: string;
@@ -97,6 +105,12 @@ export default function App() {
   );
   const [error, setError] = useState<string | null>(null);
 
+  // Stable so it does not change identity on every timer tick: Insights keys its
+  // data-loading effect off this callback, and a fresh lambda each second would
+  // make it refetch every summary/pattern/med endpoint once a second during an
+  // ongoing attack (when the elapsed timer is re-rendering App).
+  const handleUnauthorized = useCallback(() => setPinReady(false), []);
+
   const refreshRecent = useCallback(async () => {
     try {
       setRecent(await apiList(20));
@@ -107,7 +121,7 @@ export default function App() {
 
   const runSync = useCallback(async () => {
     try {
-      const result = await reconcile(loadOutbox(), startFn, endFn);
+      const result = await reconcile(loadOutbox(), startFn, endFn, doseFn, reliefFn);
       saveOutbox(result);
       setOpen(findOpen(result) ?? null);
       setPending(pendingCount(result));
@@ -153,6 +167,7 @@ export default function App() {
               meds: cur.meds,
               note: cur.note,
               attrs: null,
+              doses: [],
               startedSynced: true,
               endedSynced: false,
             });
@@ -264,6 +279,43 @@ export default function App() {
       }
     },
     []
+  );
+
+  // Log a medication dose against the open attack, timestamped now. Queued in the
+  // episode's outbox record so it survives offline and rides out to the server once
+  // the attack has a server id. `name` is optional: a fast tap need not name the pill.
+  const onLogDose = useCallback(
+    (name: string | null) => {
+      const list = loadOutbox();
+      const rec = findOpen(list);
+      if (!rec) return;
+      rec.doses.push(
+        newLocalDose({ name: name?.trim() || null, taken_at: new Date().toISOString() })
+      );
+      saveOutbox(list);
+      setOpen({ ...rec });
+      runSync();
+    },
+    [runSync]
+  );
+
+  // "I feel better": stamp relief on the most recent dose that has none yet, with an
+  // optional residual level (where the pain landed, 0 = gone). The dose-to-relief gap
+  // is what makes time-to-effect and effectiveness derivable later.
+  const onLogRelief = useCallback(
+    (residual: number | null) => {
+      const list = loadOutbox();
+      const rec = findOpen(list);
+      if (!rec) return;
+      const dose = [...rec.doses].reverse().find((d) => d.relief_at == null);
+      if (!dose) return;
+      dose.relief_at = new Date().toISOString();
+      dose.relief_severity = residual;
+      saveOutbox(list);
+      setOpen({ ...rec });
+      runSync();
+    },
+    [runSync]
   );
 
   // "I feel one coming." One tap, timestamped instantly, never asks a follow-up.
@@ -454,7 +506,7 @@ export default function App() {
           <h1 className="text-lg font-semibold tracking-tight text-zinc-200">Aura</h1>
           <StatusPill online={online} pending={pending} />
         </header>
-        <Insights onUnauthorized={() => setPinReady(false)} />
+        <Insights onUnauthorized={handleUnauthorized} />
         <TabBar tab={tab} onChange={setTab} />
       </div>
     );
@@ -486,6 +538,7 @@ export default function App() {
               <span className="text-sm opacity-80">tap when it ends</span>
             </button>
             <StartAdjust open={open} onAdjust={adjustStart} />
+            <MedPanel open={open} onLogDose={onLogDose} onLogRelief={onLogRelief} />
           </div>
         ) : (
           <button
@@ -907,14 +960,11 @@ function StartAdjust({
   const [show, setShow] = useState(false);
   const [exact, setExact] = useState("");
 
-  const presets = [
-    { label: "30 min earlier", started: () => minusMinutes(nowIso(), 30) },
-    { label: "1 hr earlier", started: () => minusMinutes(nowIso(), 60) },
-    { label: "2 hr earlier", started: () => minusMinutes(nowIso(), 120) },
-    { label: "3 hr earlier", started: () => minusMinutes(nowIso(), 180) },
-    { label: "4 hr earlier", started: () => minusMinutes(nowIso(), 240) },
-    { label: "Woke with it", started: () => nowIso() },
-  ];
+  // Compact offsets: short labels in one row. "earlier" is said once in the header,
+  // so each chip need not repeat it. "Woke with it" is a different thing (onset
+  // unknown, not an offset) and sits with the exact-time input below.
+  const offsets = [30, 60, 120, 180, 240];
+  const offsetLabel = (m: number) => (m < 60 ? `${m}m` : `${m / 60}h`);
 
   // Build an ISO from a typed HH:MM on today's calendar day (in the device's tz).
   // A time she types is a time she remembers, so it counts as a known onset.
@@ -940,27 +990,28 @@ function StartAdjust({
   }
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="flex flex-wrap justify-center gap-2">
-        {presets.map((p) => (
+    <div className="flex w-full max-w-xs flex-col gap-2.5 rounded-2xl bg-zinc-900/60 p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-zinc-400">Started earlier?</span>
+        <button onClick={() => setShow(false)} className="text-xs text-zinc-500">
+          Done
+        </button>
+      </div>
+      <div className="flex gap-1.5">
+        {offsets.map((m) => (
           <button
-            key={p.label}
+            key={m}
             onClick={() => {
-              onAdjust(p.started());
+              onAdjust(minusMinutes(nowIso(), m));
               setShow(false);
             }}
-            className="flex min-h-11 items-center rounded-lg bg-zinc-800 px-4 text-xs text-zinc-300 transition active:scale-95"
+            className="flex min-h-11 flex-1 items-center justify-center rounded-lg bg-zinc-800 text-xs tabular-nums text-zinc-300 transition active:scale-95"
           >
-            {p.label}
+            {offsetLabel(m)}
           </button>
         ))}
       </div>
-      <p className="max-w-xs text-center text-[11px] leading-relaxed text-zinc-400">
-        A preset marks the onset as an estimate: the day stays exact, the timing is
-        kept out of the premonition analysis.
-      </p>
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-zinc-400">or exact time</span>
+      <div className="flex gap-1.5">
         <input
           type="time"
           value={exact}
@@ -968,12 +1019,154 @@ function StartAdjust({
             setExact(e.target.value);
             applyExact(e.target.value);
           }}
-          className="min-h-11 rounded-lg bg-zinc-800 px-3 text-sm text-zinc-100 outline-none"
+          aria-label="Exact start time"
+          className="min-h-11 flex-1 rounded-lg bg-zinc-800 px-3 text-sm text-zinc-100 outline-none"
         />
+        <button
+          onClick={() => {
+            onAdjust(nowIso());
+            setShow(false);
+          }}
+          className="flex min-h-11 items-center rounded-lg bg-zinc-800 px-3 text-xs text-zinc-300 transition active:scale-95"
+        >
+          Woke with it
+        </button>
       </div>
-      <button onClick={() => setShow(false)} className="flex min-h-11 items-center px-4 text-xs text-zinc-400">
-        Cancel
-      </button>
+      <p className="text-[11px] leading-snug text-zinc-500">
+        A rough offset stays an estimate; a typed time counts as exact.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Medication, logged mid-attack. "Medication taken" stamps a dose at the current
+ * time (name optional, remembered for next time). Once a dose is down, "I feel
+ * better" records relief and, optionally, where the pain landed (0 = gone). The two
+ * timestamps are all that time-to-effect and effectiveness are ever derived from.
+ */
+const LAST_MED_KEY = "aura_last_med";
+
+function MedPanel({
+  open,
+  onLogDose,
+  onLogRelief,
+}: {
+  open: LocalEpisode;
+  onLogDose: (name: string | null) => void;
+  onLogRelief: (residual: number | null) => void;
+}) {
+  const [composing, setComposing] = useState(false);
+  const [name, setName] = useState(
+    () => (typeof localStorage === "undefined" ? "" : localStorage.getItem(LAST_MED_KEY) ?? "")
+  );
+  const [relieving, setRelieving] = useState(false);
+  const [residual, setResidual] = useState<number | null>(0);
+
+  const doses = open.doses;
+  // The most recent dose still waiting on an "I feel better".
+  const pending = [...doses].reverse().find((d) => d.relief_at == null);
+
+  const logDose = () => {
+    const n = name.trim();
+    if (n) localStorage.setItem(LAST_MED_KEY, n);
+    onLogDose(n || null);
+    setComposing(false);
+  };
+
+  const logRelief = () => {
+    onLogRelief(residual);
+    setRelieving(false);
+    setResidual(0);
+  };
+
+  return (
+    <div className="flex w-full max-w-xs flex-col gap-2.5 rounded-2xl bg-zinc-900/60 p-3">
+      {doses.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {doses.map((d) => (
+            <li key={d.localId} className="flex items-baseline justify-between text-xs">
+              <span className="text-zinc-300">
+                💊 {d.name || "Medication"} · {clockHM(d.taken_at)}
+              </span>
+              <span className="tabular-nums text-zinc-500">
+                {d.relief_at
+                  ? `better ${clockHM(d.relief_at)}${
+                      d.relief_severity != null ? ` · ${d.relief_severity}/10` : ""
+                    }`
+                  : "no relief yet"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {relieving ? (
+        <div className="flex flex-col gap-2">
+          <SeverityInput value={residual} onChange={setResidual} />
+          <p className="text-[11px] leading-snug text-zinc-500">
+            Where is the pain now? 0 means it is gone.
+          </p>
+          <div className="flex gap-1.5">
+            <button
+              onClick={logRelief}
+              className="flex min-h-11 flex-1 items-center justify-center rounded-lg bg-accent-500 text-sm text-white transition active:scale-95"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => setRelieving(false)}
+              className="flex min-h-11 items-center rounded-lg bg-zinc-800 px-3 text-xs text-zinc-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : composing ? (
+        <div className="flex flex-col gap-2">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && logDose()}
+            placeholder="What did you take? (optional)"
+            aria-label="Medication name"
+            autoFocus
+            className="min-h-11 rounded-lg bg-zinc-800 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+          />
+          <div className="flex gap-1.5">
+            <button
+              onClick={logDose}
+              className="flex min-h-11 flex-1 items-center justify-center rounded-lg bg-accent-500 text-sm text-white transition active:scale-95"
+            >
+              Log dose now
+            </button>
+            <button
+              onClick={() => setComposing(false)}
+              className="flex min-h-11 items-center rounded-lg bg-zinc-800 px-3 text-xs text-zinc-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => setComposing(true)}
+            className="flex min-h-11 flex-1 items-center justify-center rounded-lg bg-zinc-800 text-sm text-zinc-200 transition active:scale-95"
+          >
+            {doses.length ? "Another dose" : "Medication taken"}
+          </button>
+          {pending && (
+            <button
+              onClick={() => setRelieving(true)}
+              className="flex min-h-11 flex-1 items-center justify-center rounded-lg border border-accent-500/60 text-sm text-accent-300 transition active:scale-95"
+            >
+              I feel better
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

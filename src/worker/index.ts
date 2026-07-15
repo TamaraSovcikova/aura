@@ -8,10 +8,11 @@ import { aggregateSleepSessions, validateHealthDays } from "../shared/health";
 import { triggerAnalysis } from "./triggers";
 import { dayOfWeekAnalysis, timeOfDayAnalysis } from "./patterns";
 import { menstrualAnalysis } from "./cycle";
+import { medicationResponse } from "./meds";
 import { buildSummary } from "./insights";
 import { doctorHtml, episodesCsv, obsidianMarkdown } from "./export";
 import { fetchEnrichment, roundCoord } from "./enrich";
-import type { Episode, StartBody, EndBody } from "../shared/types";
+import type { Episode, StartBody, EndBody, MedDose, DoseBody, ReliefBody } from "../shared/types";
 
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -201,6 +202,72 @@ app.patch("/api/episodes/:id", async (c) => {
     await upsertPeakSample(c.env.DB, id, severity, row.ended_at ?? nowIso());
   }
   return c.json(row);
+});
+
+// --- Medication doses ------------------------------------------------------
+// A dose taken mid-attack: logged with one tap. The optional "I feel better"
+// follow-up (relief endpoint) is what turns two timestamps into time-to-effect.
+
+// Log a dose against an episode. `name` optional; `client_taken_at` lets an
+// offline log carry the real moment rather than the sync time.
+app.post("/api/episodes/:id/meds", async (c) => {
+  const episodeId = Number(c.req.param("id"));
+  if (!Number.isInteger(episodeId)) return c.json({ error: "bad id" }, 400);
+  const body = await c.req.json<DoseBody>().catch(() => ({}) as DoseBody);
+  const takenAt = body.client_taken_at ?? nowIso();
+
+  // The episode must exist, or a dose would dangle against nothing.
+  const ep = await c.env.DB.prepare(`SELECT id FROM episodes WHERE id = ?`)
+    .bind(episodeId)
+    .first<{ id: number }>();
+  if (!ep) return c.json({ error: "episode not found" }, 404);
+
+  const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : null;
+  const row = await c.env.DB.prepare(
+    `INSERT INTO med_doses (episode_id, name, taken_at)
+     VALUES (?, ?, ?) RETURNING *`
+  )
+    .bind(episodeId, name, takenAt)
+    .first<MedDose>();
+  return c.json(row, 201);
+});
+
+// Record that a logged dose brought relief: when, and to what residual level.
+app.post("/api/meds/:doseId/relief", async (c) => {
+  const doseId = Number(c.req.param("doseId"));
+  if (!Number.isInteger(doseId)) return c.json({ error: "bad id" }, 400);
+  const body = await c.req.json<ReliefBody>().catch(() => ({}) as ReliefBody);
+  const reliefAt = body.client_relief_at ?? nowIso();
+
+  if (
+    body.relief_severity !== undefined &&
+    body.relief_severity !== null &&
+    validSeverity(body.relief_severity) === null
+  ) {
+    return c.json({ error: "relief_severity must be an integer 0-10" }, 400);
+  }
+  const residual = validSeverity(body.relief_severity);
+
+  const row = await c.env.DB.prepare(
+    `UPDATE med_doses SET relief_at = ?, relief_severity = ?
+      WHERE id = ? RETURNING *`
+  )
+    .bind(reliefAt, residual, doseId)
+    .first<MedDose>();
+  if (!row) return c.json({ error: "not found" }, 404);
+  return c.json(row);
+});
+
+// Doses for an episode, oldest first (the order they were taken).
+app.get("/api/episodes/:id/meds", async (c) => {
+  const episodeId = Number(c.req.param("id"));
+  if (!Number.isInteger(episodeId)) return c.json({ error: "bad id" }, 400);
+  const res = await c.env.DB.prepare(
+    `SELECT * FROM med_doses WHERE episode_id = ? ORDER BY taken_at ASC`
+  )
+    .bind(episodeId)
+    .all<MedDose>();
+  return c.json(res.results);
 });
 
 // --- Premonitions ----------------------------------------------------------
@@ -469,6 +536,8 @@ app.get("/api/patterns", async (c) =>
     time_of_day: await timeOfDayAnalysis(c.env.DB),
   })
 );
+
+app.get("/api/meds/response", async (c) => c.json(await medicationResponse(c.env.DB)));
 
 // --- MCP server ------------------------------------------------------------
 // Mounted before the SPA fallback so /mcp is never swallowed by index.html.

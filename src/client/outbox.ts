@@ -1,5 +1,21 @@
-import type { EndBody } from "../shared/types";
+import type { EndBody, DoseBody, ReliefBody } from "../shared/types";
 import type { Attrs } from "./SymptomDetails";
+
+// A medication dose logged mid-attack. Rides the same outbox as its episode so a
+// dose (and its later "I feel better") is never lost to a dead connection. It can
+// only be POSTed once its episode has a server id, so it waits in the record until
+// the episode start has synced.
+export interface LocalDose {
+  localId: string;
+  serverId: number | null;
+  name: string | null;
+  taken_at: string;
+  /** Null until she taps "I feel better"; that gap means the dose did not help. */
+  relief_at: string | null;
+  relief_severity: number | null;
+  takenSynced: boolean;
+  reliefSynced: boolean;
+}
 
 // A migraine episode captured on the device. Lives in localStorage until it is
 // fully synced to the server, so a log is never lost to a dead connection.
@@ -18,8 +34,29 @@ export interface LocalEpisode {
   note: string | null;
   /** Optional ICHD-3 attributes captured in the end panel; null until provided. */
   attrs: Attrs | null;
+  /** Medication doses taken during the attack; each syncs independently. */
+  doses: LocalDose[];
   startedSynced: boolean;
   endedSynced: boolean;
+}
+
+export function newLocalDose(input: { name: string | null; taken_at: string }): LocalDose {
+  return {
+    localId: crypto.randomUUID(),
+    serverId: null,
+    name: input.name,
+    taken_at: input.taken_at,
+    relief_at: null,
+    relief_severity: null,
+    takenSynced: false,
+    reliefSynced: false,
+  };
+}
+
+/** A dose is done syncing once the dose itself is up and, if relief was recorded,
+ *  that is up too. A dose with no relief_at is fully synced after just the POST. */
+function doseSynced(d: LocalDose): boolean {
+  return d.takenSynced && (d.relief_at == null || d.reliefSynced);
 }
 
 const KEY = "aura_outbox";
@@ -56,6 +93,7 @@ export function newLocalEpisode(input: {
     meds: null,
     note: null,
     attrs: null,
+    doses: [],
     startedSynced: false,
     endedSynced: false,
   };
@@ -68,17 +106,23 @@ export function findOpen(list: LocalEpisode[]): LocalEpisode | undefined {
 
 export type StartFn = (e: LocalEpisode) => Promise<number>;
 export type EndFn = (serverId: number, body: EndBody) => Promise<void>;
+export type DoseFn = (episodeServerId: number, body: DoseBody) => Promise<number>;
+export type ReliefFn = (doseServerId: number, body: ReliefBody) => Promise<void>;
 
 /**
  * Flush queued episodes to the server. A start is POSTed at most once (guarded
- * by `startedSynced`), so retries never create duplicate rows. A record is
- * dropped only once both start and end are synced; ongoing episodes and any
- * that failed to sync are retained for the next attempt.
+ * by `startedSynced`), so retries never create duplicate rows. Medication doses
+ * ride along: each is POSTed once its episode has a server id, and its later
+ * relief once the dose does. A record is dropped only once its start, end, and
+ * every dose are synced; ongoing episodes, pending doses, and anything that
+ * failed to sync are retained for the next attempt.
  */
 export async function reconcile(
   list: LocalEpisode[],
   startFn: StartFn,
-  endFn: EndFn
+  endFn: EndFn,
+  doseFn?: DoseFn,
+  reliefFn?: ReliefFn
 ): Promise<LocalEpisode[]> {
   const keep: LocalEpisode[] = [];
   for (const e of list) {
@@ -108,6 +152,25 @@ export async function reconcile(
         });
         e.endedSynced = true;
       }
+      // Doses need the episode's server id, so they only flush after the start has.
+      if (e.serverId != null && doseFn && reliefFn) {
+        for (const d of e.doses) {
+          if (!d.takenSynced) {
+            d.serverId = await doseFn(e.serverId, {
+              name: d.name,
+              client_taken_at: d.taken_at,
+            });
+            d.takenSynced = true;
+          }
+          if (d.relief_at && !d.reliefSynced && d.serverId != null) {
+            await reliefFn(d.serverId, {
+              relief_severity: d.relief_severity ?? undefined,
+              client_relief_at: d.relief_at,
+            });
+            d.reliefSynced = true;
+          }
+        }
+      }
     } catch (err) {
       // Surface auth failures so the UI can re-prompt for the PIN; treat every
       // other error as a transient network problem and keep the record.
@@ -115,7 +178,8 @@ export async function reconcile(
       keep.push(e);
       continue;
     }
-    if (!(e.startedSynced && e.endedSynced)) keep.push(e);
+    const dosesDone = e.doses.every(doseSynced);
+    if (!(e.startedSynced && e.endedSynced && dosesDone)) keep.push(e);
   }
   return keep;
 }
