@@ -236,12 +236,15 @@ export default function App() {
   // the onset is held out of the premonition timing stat. `startedAt` is a UTC ISO;
   // `woke` means "present on waking, onset unknown" and keeps the current instant.
   const adjustStart = useCallback(
-    async (startedAt: string) => {
+    // `known` is true only when she types the exact clock time she remembers; the
+    // quick presets are estimates and stay time-unknown (held out of the premonition
+    // timing stat).
+    async (startedAt: string, known = false) => {
       const list = loadOutbox();
       const rec = findOpen(list);
       if (!rec) return;
       rec.started_at = startedAt;
-      rec.time_known = false;
+      rec.time_known = known;
       saveOutbox(list);
       setOpen({ ...rec });
       // If the start already reached the server, correct it there too; otherwise
@@ -250,7 +253,7 @@ export default function App() {
         try {
           await apiPatch(rec.serverId, {
             started_at: startedAt,
-            started_at_time_known: 0,
+            started_at_time_known: known ? 1 : 0,
           });
         } catch (e) {
           if (e instanceof UnauthorizedError) {
@@ -754,36 +757,9 @@ function EditPanel({
           </p>
         )}
 
-        <div className="mt-4 mb-2 flex items-baseline justify-between">
-          <p className="text-xs uppercase tracking-wide text-zinc-400">
-            Peak severity
-          </p>
-          <span className="text-sm tabular-nums text-zinc-300">
-            {severity === null ? "not set" : `${severity}/${SEVERITY_MAX}`}
-          </span>
+        <div className="mt-4">
+          <SeverityInput value={severity} onChange={setSeverity} />
         </div>
-        <input
-          type="range"
-          min={SEVERITY_MIN}
-          max={SEVERITY_MAX}
-          step={1}
-          value={severity ?? 0}
-          onChange={(e) => setSeverity(Number(e.target.value))}
-          className="w-full accent-accent-500"
-        />
-        <div className="flex justify-between text-[10px] text-zinc-400">
-          <span>0</span>
-          <span>5</span>
-          <span>10</span>
-        </div>
-        {severity !== null && (
-          <button
-            onClick={() => setSeverity(null)}
-            className="mt-1 flex min-h-11 items-center px-1 text-xs text-zinc-400 underline"
-          >
-            clear severity
-          </button>
-        )}
 
         <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-zinc-400">
           Meds taken
@@ -926,16 +902,31 @@ function StartAdjust({
   onAdjust,
 }: {
   open: LocalEpisode;
-  onAdjust: (startedAt: string) => void;
+  onAdjust: (startedAt: string, known?: boolean) => void;
 }) {
   const [show, setShow] = useState(false);
+  const [exact, setExact] = useState("");
 
   const presets = [
     { label: "30 min earlier", started: () => minusMinutes(nowIso(), 30) },
     { label: "1 hr earlier", started: () => minusMinutes(nowIso(), 60) },
     { label: "2 hr earlier", started: () => minusMinutes(nowIso(), 120) },
+    { label: "3 hr earlier", started: () => minusMinutes(nowIso(), 180) },
+    { label: "4 hr earlier", started: () => minusMinutes(nowIso(), 240) },
     { label: "Woke with it", started: () => nowIso() },
   ];
+
+  // Build an ISO from a typed HH:MM on today's calendar day (in the device's tz).
+  // A time she types is a time she remembers, so it counts as a known onset.
+  const applyExact = (hhmm: string) => {
+    if (!/^\d{2}:\d{2}$/.test(hhmm)) return;
+    const datePart = isoToLocalInput(open.started_at).slice(0, 10);
+    const iso = localInputToIso(`${datePart}T${hhmm}`);
+    if (iso) {
+      onAdjust(iso, true);
+      setShow(false);
+    }
+  };
 
   if (!show) {
     return (
@@ -965,12 +956,80 @@ function StartAdjust({
         ))}
       </div>
       <p className="max-w-xs text-center text-[11px] leading-relaxed text-zinc-400">
-        Marks the onset as an estimate: the day stays exact, the timing is kept out
-        of the premonition analysis.
+        A preset marks the onset as an estimate: the day stays exact, the timing is
+        kept out of the premonition analysis.
       </p>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-zinc-400">or exact time</span>
+        <input
+          type="time"
+          value={exact}
+          onChange={(e) => {
+            setExact(e.target.value);
+            applyExact(e.target.value);
+          }}
+          className="min-h-11 rounded-lg bg-zinc-800 px-3 text-sm text-zinc-100 outline-none"
+        />
+      </div>
       <button onClick={() => setShow(false)} className="flex min-h-11 items-center px-4 text-xs text-zinc-400">
         Cancel
       </button>
+    </div>
+  );
+}
+
+/** One severity control, used identically when ending an attack and when editing it
+ *  later. Quick presets for a fast tap mid-migraine, a slider underneath for the
+ *  exact 0-10 when there is time. Same everywhere, so the two never feel different. */
+function SeverityInput({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (v: number | null) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-2 flex items-baseline justify-between">
+        <p className="text-xs uppercase tracking-wide text-zinc-400">Severity</p>
+        <span className="text-sm tabular-nums text-zinc-300">
+          {value === null ? "not set" : `${value}/${SEVERITY_MAX}`}
+        </span>
+      </div>
+      <div className="flex gap-2">
+        {SEVERITY_QUICK.map((l) => (
+          <button
+            key={l.level}
+            onClick={() => onChange(value === l.level ? null : l.level)}
+            className={`flex min-h-11 flex-1 items-center justify-center rounded-lg px-3 text-sm transition ${
+              value === l.level ? "bg-accent-500 text-white" : "bg-zinc-800 text-zinc-300"
+            }`}
+          >
+            {l.label}
+          </button>
+        ))}
+      </div>
+      <input
+        type="range"
+        min={SEVERITY_MIN}
+        max={SEVERITY_MAX}
+        step={1}
+        value={value ?? 0}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="mt-3 w-full accent-accent-500"
+      />
+      <div className="flex justify-between text-[10px] text-zinc-400">
+        <span>0 none</span>
+        <span>10 worst</span>
+      </div>
+      {value !== null && (
+        <button
+          onClick={() => onChange(null)}
+          className="mt-1 flex min-h-11 items-center px-1 text-xs text-zinc-400 underline"
+        >
+          clear
+        </button>
+      )}
     </div>
   );
 }
@@ -1002,8 +1061,6 @@ function EndPanel({
   const [attrs, setAttrs] = useState<Attrs>(emptyAttrs());
   const [showSymptoms, setShowSymptoms] = useState(false);
 
-  const levels = SEVERITY_QUICK;
-
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6">
       <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-zinc-900 p-6 sm:rounded-2xl">
@@ -1030,23 +1087,8 @@ function EndPanel({
           ))}
         </div>
 
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-zinc-400">
-          Severity
-        </p>
-        <div className="flex gap-2">
-          {levels.map((l) => (
-            <button
-              key={l.level}
-              onClick={() => setSeverity(severity === l.level ? null : l.level)}
-              className={`flex min-h-11 flex-1 items-center justify-center rounded-lg px-3 text-sm transition ${
-                severity === l.level
-                  ? "bg-accent-500 text-white"
-                  : "bg-zinc-800 text-zinc-300"
-              }`}
-            >
-              {l.label}
-            </button>
-          ))}
+        <div className="mt-4">
+          <SeverityInput value={severity} onChange={setSeverity} />
         </div>
 
         <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-zinc-400">

@@ -75,21 +75,26 @@ export default function HeadMap({
       </div>
 
       <svg viewBox="0 0 200 240" className="h-72 w-auto" role="group" aria-label="Head map">
-        {/* Head outline. Front adds a jaw taper; back is a plain oval. */}
-        <ellipse
-          cx={100}
-          cy={116}
-          rx={68}
-          ry={92}
-          className="fill-zinc-800/40 stroke-zinc-600"
-          strokeWidth={1.5}
+        {/* A solid head silhouette so the regions sit on a surface rather than
+            floating as wireframe rings. Front tapers to a jaw; back is a rounder
+            skull. */}
+        <path
+          d={
+            view === "front"
+              ? "M100 22 C64 22 42 52 42 98 C42 140 54 180 78 198 C86 205 114 205 122 198 C146 180 158 140 158 98 C158 52 136 22 100 22 Z"
+              : "M100 20 C60 20 38 58 38 112 C38 172 66 214 100 214 C134 214 162 172 162 112 C162 58 140 20 100 20 Z"
+          }
+          className="fill-zinc-800 stroke-zinc-700"
+          strokeWidth={2}
         />
         {view === "front" && (
-          <>
-            <ellipse cx={78} cy={116} rx={5} ry={6} className="fill-zinc-500" />
-            <ellipse cx={122} cy={116} rx={5} ry={6} className="fill-zinc-500" />
-            <path d="M92 150 q8 8 16 0" className="fill-none stroke-zinc-500" strokeWidth={1.5} />
-          </>
+          // A faint nose, just enough to read as a face without looking like clipart.
+          <path
+            d="M100 108 L94 146 Q100 152 106 146 Z"
+            className="fill-none stroke-zinc-600"
+            strokeWidth={1.5}
+            strokeLinejoin="round"
+          />
         )}
         {shapes.map((s) => {
           const on = selected.has(s.id);
@@ -106,10 +111,10 @@ export default function HeadMap({
               aria-pressed={on}
               className={`cursor-pointer transition ${
                 on
-                  ? "fill-rose-500/70 stroke-rose-400"
-                  : "fill-transparent stroke-zinc-600 hover:fill-zinc-700/40"
+                  ? "fill-rose-500/80 stroke-rose-300"
+                  : "fill-zinc-700/50 stroke-zinc-600 hover:fill-zinc-600/70"
               }`}
-              strokeWidth={1.5}
+              strokeWidth={1.25}
             />
           );
         })}

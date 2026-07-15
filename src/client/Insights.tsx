@@ -69,40 +69,43 @@ export default function Insights({ onUnauthorized }: { onUnauthorized: () => voi
   }
 
   return (
-    <div className="flex flex-col gap-8 pb-4">
+    <div className="flex flex-col gap-9 pb-4">
       <Header s={summary} />
       <MonthChart s={summary} />
+      <MigraineVsHeadache s={summary} />
       <MedTable s={summary} />
       <CycleCard events={cycle} onChange={load} onUnauthorized={onUnauthorized} />
-      <Cards s={summary} />
+      <StillLearning s={summary} />
       <Exports onUnauthorized={onUnauthorized} />
     </div>
   );
 }
 
+function Stat({ value, label, tone }: { value: number; label: string; tone: string }) {
+  return (
+    <div>
+      <div className={`text-3xl font-semibold tabular-nums ${tone}`}>{value}</div>
+      <div className="text-xs text-zinc-400">{label}</div>
+    </div>
+  );
+}
+
+/** The headline: the two numbers a doctor reads, and the shape of a typical month.
+ *  This absorbs what used to be three separate cards. */
 function Header({ s }: { s: Summary }) {
+  const complete = s.months.filter((m) => m.complete);
+  const perMonth = complete.length
+    ? (complete.reduce((a, m) => a + m.headache_days, 0) / complete.length).toFixed(1)
+    : null;
   return (
     <section>
-      <div className="flex items-baseline gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold text-zinc-100 tabular-nums">
-            {s.headache_days}
-          </h2>
-          <p className="text-xs text-zinc-400">headache days</p>
-        </div>
-        <div>
-          <h2 className="text-2xl font-semibold text-rose-300 tabular-nums">
-            {s.migraine_days}
-          </h2>
-          <p className="text-xs text-zinc-400">migraine days</p>
-        </div>
+      <div className="flex items-baseline gap-8">
+        <Stat value={s.headache_days} label="headache days" tone="text-zinc-100" />
+        <Stat value={s.migraine_days} label="migraine days" tone="text-rose-300" />
       </div>
-      <p className="mt-2 text-sm text-zinc-400">
+      <p className="mt-3 text-sm text-zinc-400">
+        {perMonth ? `About ${perMonth} a month. ` : ""}
         {s.episodes} episodes, {s.first_day} to {s.last_day}.
-      </p>
-      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-        Migraine days are the ones meeting ICHD-3 criteria from the symptoms you
-        recorded. The imported history has none, so it counts as headache days only.
       </p>
     </section>
   );
@@ -111,11 +114,16 @@ function Header({ s }: { s: Summary }) {
 function MonthChart({ s }: { s: Summary }) {
   const months = s.months.slice(-14);
   const max = Math.max(1, ...months.map((m) => m.headache_days));
+  const t = s.trend;
+  const trendLine = t.enough_data
+    ? `Last 3 complete months: ${t.recent_mean_headache_days} a month, against ${t.prior_mean_headache_days} in the 3 before (${t.percent_change ?? 0}%).`
+    : "Not enough complete months yet to compare one quarter with the last.";
   return (
     <section>
-      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-400">
+      <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
         Headache days per month
       </h3>
+      <p className="mb-3 text-xs text-zinc-400">{trendLine}</p>
       <ul className="flex flex-col gap-1.5">
         {months.map((m) => (
           <li key={m.month} className="flex items-center gap-2 text-xs">
@@ -142,8 +150,7 @@ function MonthChart({ s }: { s: Summary }) {
       </ul>
       {months.some((m) => !m.complete) && (
         <p className="mt-2 text-xs text-zinc-400">
-          Grey months were only partly observed. They are excluded from every average,
-          because averaging a part-month against full ones invents a change.
+          Grey months were only partly observed, so they sit out of the averages.
         </p>
       )}
     </section>
@@ -192,11 +199,9 @@ function MedTable({ s }: { s: Summary }) {
           ))}
         </tbody>
       </table>
-      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-        Red means that month reached an ICHD-3 day count (triptans on 10 days, simple
-        analgesics on 15). Sustained past three months, that is worth showing a
-        neurologist. It is a count, not a diagnosis, and it is never inferred from an
-        old trigger tag.
+      <p className="mt-2 text-xs text-zinc-400">
+        Red flags an ICHD-3 overuse day count (triptans 10, analgesics 15). Sustained
+        past three months, worth showing a neurologist.
       </p>
     </section>
   );
@@ -271,37 +276,83 @@ function CycleCard({
         </div>
       )}
 
-      <p className="mt-3 text-xs leading-relaxed text-zinc-400">
-        {starts.length} logged. One tap a month is enough: the cycle day of every day in
-        between is worked out from these dates, so days without a headache count too.
-        There is no cycle data in your old notes, so this question can only be answered
-        forwards, from about six months of tapping.
+      <p className="mt-3 text-xs text-zinc-400">
+        {starts.length} logged. One tap a month; the answer takes about six months of
+        tapping to earn.
       </p>
     </section>
   );
 }
 
-function Cards({ s }: { s: Summary }) {
+/** Where the migraine-day number comes from. One compact callout instead of a card
+ *  buried in a list, because turning headache days into migraine days is the whole
+ *  point of recording symptoms. */
+function MigraineVsHeadache({ s }: { s: Summary }) {
+  const c = s.classified;
+  const dayWord = s.migraine_days === 1 ? "day" : "days";
+  return (
+    <section className="rounded-xl bg-zinc-900/60 p-4">
+      <h3 className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+        Migraine or headache
+      </h3>
+      {c.attacks_with_attributes === 0 ? (
+        <p className="mt-2 text-sm text-zinc-300">
+          No attacks carry symptom details yet. Add them when an attack ends and Aura
+          checks each against the ICHD-3 criteria.
+        </p>
+      ) : (
+        <>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-200">
+            {c.migraine} of {c.attacks_with_attributes} attacks you have described meet
+            the ICHD-3 criteria for migraine
+            {c.probable_migraine ? `, ${c.probable_migraine} probably do` : ""}. That is{" "}
+            {s.migraine_days} migraine {dayWord}.
+          </p>
+          <p className="mt-1.5 text-xs text-zinc-400">
+            Which criteria an attack meets, not a diagnosis. The imported diary has no
+            symptoms, so it counts as headache days only.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Weather, sleep and premonitions all need more data before they can say anything.
+ *  Folded into one collapsed section so they stop shouting "insufficient data" from
+ *  four separate cards. */
+const SURFACED = new Set(["Is it getting worse?", "Migraine or headache?", "Menstrual cycle"]);
+
+function StillLearning({ s }: { s: Summary }) {
+  const [open, setOpen] = useState(false);
+  const items = s.insights.filter((i) => i.kind === "gated" && !SURFACED.has(i.title));
+  if (items.length === 0) return null;
   return (
     <section>
-      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-400">
-        What the data says
-      </h3>
-      <ul className="flex flex-col gap-3">
-        {s.insights.map((i) => (
-          <li key={i.title} className="rounded-xl bg-zinc-900/60 p-4">
-            <div className="flex items-baseline justify-between gap-2">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex min-h-11 w-full items-center justify-between"
+      >
+        <h3 className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+          Still being learned
+        </h3>
+        <span className="text-lg text-zinc-400">{open ? "–" : "+"}</span>
+      </button>
+      {open ? (
+        <ul className="mt-1 flex flex-col gap-3">
+          {items.map((i) => (
+            <li key={i.title} className="rounded-xl bg-zinc-900/60 p-4">
               <h4 className="text-sm font-medium text-zinc-200">{i.title}</h4>
-              {i.kind === "gated" && (
-                <span className="shrink-0 rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
-                  tested
-                </span>
-              )}
-            </div>
-            <p className="mt-1.5 text-xs leading-relaxed text-zinc-400">{i.body}</p>
-          </li>
-        ))}
-      </ul>
+              <p className="mt-1.5 text-xs leading-relaxed text-zinc-400">{i.body}</p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs leading-relaxed text-zinc-400">
+          Weather, sleep and premonitions each need more data before Aura will call
+          anything. Tap to see where they stand.
+        </p>
+      )}
     </section>
   );
 }
@@ -365,8 +416,7 @@ function Exports({ onUnauthorized }: { onUnauthorized: () => void }) {
         {busy === "obsidian" ? "Preparing…" : "Obsidian snapshot (.md)"}
       </button>
       <p className="mt-2 text-xs text-zinc-400">
-        The summary opens in a new tab to print to PDF. The Obsidian snapshot is a
-        read-only markdown file for your vault; re-download it to refresh.
+        The summary opens in a new tab to print to PDF.
       </p>
     </section>
   );

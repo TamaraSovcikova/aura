@@ -22,12 +22,13 @@ class FakeRecognition {
   stop() {
     this.onend?.();
   }
-  /** Emit results; each entry becomes one SpeechRecognitionResult. */
-  emit(parts: Array<{ text: string; final: boolean }>) {
+  /** Emit results; each entry becomes one SpeechRecognitionResult. `resultIndex` is
+   *  the first changed index, exactly as Chrome reports it. */
+  emit(parts: Array<{ text: string; final: boolean }>, resultIndex = 0) {
     const results = parts.map((p) =>
       Object.assign([{ transcript: p.text }], { isFinal: p.final })
     );
-    this.onresult?.({ results });
+    this.onresult?.({ results, resultIndex });
   }
   /** Chrome ends the run after a silence gap. */
   endFromSilence() {
@@ -96,6 +97,37 @@ describe("listen", () => {
     FakeRecognition.instances[1].emit([{ text: "behind left eye", final: true }]);
 
     expect(texts.at(-1)).toBe("woke up with it behind left eye");
+  });
+
+  it("does not duplicate a phrase the recognizer replays after a restart", () => {
+    // The Android bug: the new instance replays the previous final as its first
+    // result, then adds the new phrase. It must not double the replayed text.
+    const texts: string[] = [];
+    listen((t) => texts.push(t), () => {});
+
+    FakeRecognition.instances[0].emit([{ text: "woke up with it", final: true }]);
+    FakeRecognition.instances[0].endFromSilence();
+    FakeRecognition.instances[1].emit([
+      { text: "woke up with it", final: true },
+      { text: "behind my left eye", final: true },
+    ]);
+
+    expect(texts.at(-1)).toBe("woke up with it behind my left eye");
+  });
+
+  it("appends each result once as it finalizes within one instance", () => {
+    const texts: string[] = [];
+    listen((t) => texts.push(t), () => {});
+    const rec = FakeRecognition.instances[0];
+
+    // interim "hello", then hello finalizes, then interim "world" at index 1, then
+    // world finalizes. resultIndex advances so nothing is re-read.
+    rec.emit([{ text: "hello", final: false }], 0);
+    rec.emit([{ text: "hello", final: true }], 0);
+    rec.emit([{ text: "hello", final: true }, { text: "world", final: false }], 1);
+    rec.emit([{ text: "hello", final: true }, { text: "world", final: true }], 1);
+
+    expect(texts.at(-1)).toBe("hello world");
   });
 
   it("finishes only on an explicit stop, emitting the full transcript", () => {

@@ -16,6 +16,9 @@ interface SpeechRecognitionResultLike extends ArrayLike<{ transcript: string }> 
 
 interface SpeechRecognitionEventLike {
   results: ArrayLike<SpeechRecognitionResultLike>;
+  /** Index of the first result that changed in this event. Everything before it is
+   *  already final and must not be re-read, or phrases duplicate. */
+  resultIndex: number;
 }
 
 interface SpeechRecognitionLike {
@@ -62,6 +65,23 @@ export function appendTranscript(base: string, addition: string): string {
 }
 
 /**
+ * Append a finalized phrase, but drop it when it just repeats the tail of what we
+ * already have. On Android a restarted recognizer sometimes replays the previous
+ * session's final text as the first result of the new one, which is what made
+ * whole phrases duplicate. Single words are always kept (so "no no no" survives);
+ * only a repeated multi-word phrase is treated as a replay.
+ */
+export function commitFinal(base: string, addition: string): string {
+  const b = base.trim();
+  const a = addition.trim();
+  if (!a) return b;
+  if (!b) return a;
+  const multiWord = /\s/.test(a);
+  if (multiWord && b.toLowerCase().endsWith(a.toLowerCase())) return b;
+  return `${b} ${a}`;
+}
+
+/**
  * Start listening. `onText` receives the transcript of THIS session as it grows
  * (the caller is responsible for appending it to any pre-existing note).
  * Returns a stop function; `onDone` fires once listening has truly finished.
@@ -77,29 +97,32 @@ export function listen(
   }
 
   let stopped = false;
-  let committed = ""; // finalized text carried across restarts
+  let committed = ""; // finalized text, appended once per result, carried across restarts
   let current: SpeechRecognitionLike | null = null;
   const startedAt = Date.now();
 
   const startInstance = () => {
-    let instanceFinal = "";
     const rec = new Ctor();
     current = rec;
     rec.lang = navigator.language || "en-US";
     rec.interimResults = true;
     rec.continuous = true; // ride through pauses
 
+    // Read only the results from `resultIndex` forward: the ones that changed in
+    // this event. Each result is appended to `committed` exactly once, when it turns
+    // final. Re-reading from index 0 (or committing a whole instance at onend) is
+    // what caused phrases to duplicate across the pause-restart cycle.
     rec.onresult = (e) => {
-      let finalText = "";
       let interim = "";
-      for (let i = 0; i < e.results.length; i++) {
+      // A fresh instance replays finals from index 0, so a missing resultIndex must
+      // start at 0, not undefined (which would skip the loop entirely).
+      for (let i = e.resultIndex ?? 0; i < e.results.length; i++) {
         const res = e.results[i];
         const t = res[0]?.transcript ?? "";
-        if (res.isFinal) finalText = appendTranscript(finalText, t);
+        if (res.isFinal) committed = commitFinal(committed, t);
         else interim = appendTranscript(interim, t);
       }
-      instanceFinal = finalText;
-      onText(appendTranscript(committed, appendTranscript(finalText, interim)));
+      onText(appendTranscript(committed, interim));
     };
 
     rec.onerror = (e) => {
@@ -108,7 +131,6 @@ export function listen(
     };
 
     rec.onend = () => {
-      committed = appendTranscript(committed, instanceFinal);
       const expired = Date.now() - startedAt > MAX_SESSION_MS;
       if (stopped || expired) {
         onText(committed);
