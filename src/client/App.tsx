@@ -130,7 +130,13 @@ export default function App() {
       if (e instanceof UnauthorizedError) {
         setError("That PIN was rejected. Enter it again.");
         setPinReady(false);
+        return;
       }
+      // reconcile absorbs network failures itself by retaining the record, so
+      // anything escaping it is a bug, not a dead connection. Swallowing it here is
+      // how a broken sync stays broken and silent: say it out loud instead.
+      console.error("Aura sync failed unexpectedly:", e);
+      setError("Sync hit an unexpected problem. Your logs are safe on this phone.");
     }
   }, []);
 
@@ -1063,7 +1069,10 @@ function MedPanel({
   const [relieving, setRelieving] = useState(false);
   const [residual, setResidual] = useState<number | null>(0);
 
-  const doses = open.doses;
+  // Defaulted, not assumed: an attack queued by a build that predates the medication
+  // feature has no `doses` at all. loadOutbox now normalises that, but this render
+  // must not be the thing that decides whether the app opens.
+  const doses = open.doses ?? [];
   // The most recent dose still waiting on an "I feel better".
   const pending = [...doses].reverse().find((d) => d.relief_at == null);
 
