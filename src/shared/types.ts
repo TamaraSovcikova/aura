@@ -36,6 +36,11 @@ export interface Episode {
   pain_regions?: string | null;
   /** 'app' | 'obsidian-import' */
   source?: string;
+  /** Medication summary, present on list responses only (see GET /api/episodes).
+   *  The log needs "was anything taken, did it help"; the doses themselves are
+   *  fetched by the detail sheet when it opens. */
+  dose_count?: number;
+  dose_relief_count?: number;
   /** Imported verbatim. Never feeds the trigger engine or any classification. */
   self_reported_triggers?: string | null;
   self_reported_type?: string | null;

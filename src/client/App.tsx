@@ -132,9 +132,11 @@ export default function App() {
   // ongoing attack (when the elapsed timer is re-rendering App).
   const handleUnauthorized = useCallback(() => setPinReady(false), []);
 
+  // The whole log, not a window onto it. This fetched 20 rows while the history ran
+  // to a couple of hundred, so most of it could not be reached from the UI at all.
   const refreshRecent = useCallback(async () => {
     try {
-      setRecent(await apiList(20));
+      setRecent(await apiList(500));
     } catch {
       /* offline: keep what we have */
     }

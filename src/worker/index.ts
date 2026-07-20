@@ -120,12 +120,23 @@ app.get("/api/episodes/current", async (c) => {
   return c.json(row ?? null);
 });
 
-// Recent episodes, newest first.
+// Episodes, newest first.
+//
+// Each row carries a small medication summary so the log can show what was taken
+// and whether it helped without a request per row. The counts are deliberately not
+// the doses themselves: the list needs "was anything taken, did it work", and the
+// detail sheet fetches the doses when it actually needs them.
 app.get("/api/episodes", async (c) => {
   const raw = Number(c.req.query("limit") ?? 30);
-  const limit = Math.min(Number.isFinite(raw) && raw > 0 ? raw : 30, 200);
+  const limit = Math.min(Number.isFinite(raw) && raw > 0 ? raw : 30, 500);
   const res = await c.env.DB.prepare(
-    `SELECT * FROM episodes ORDER BY started_at DESC LIMIT ?`
+    `SELECT e.*,
+            (SELECT COUNT(*) FROM med_doses d WHERE d.episode_id = e.id) AS dose_count,
+            (SELECT COUNT(*) FROM med_doses d
+              WHERE d.episode_id = e.id AND d.relief_at IS NOT NULL) AS dose_relief_count
+       FROM episodes e
+      ORDER BY e.started_at DESC
+      LIMIT ?`
   )
     .bind(limit)
     .all<Episode>();

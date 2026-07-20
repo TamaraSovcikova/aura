@@ -99,6 +99,42 @@ describe("medication dose endpoints", () => {
     expect(relRes.status).toBe(400);
   });
 
+  it("summarises doses on the episode list so the log can show them", async () => {
+    const id = await openEpisode(d1);
+    const mk = async (name: string) =>
+      ((await (
+        await app.request(
+          `/api/episodes/${id}/meds`,
+          { method: "POST", headers: authed, body: JSON.stringify({ name }) },
+          env(d1)
+        )
+      ).json()) as { id: number }).id;
+    const first = await mk("Sumatriptan");
+    await mk("Ibuprofen");
+    await app.request(
+      `/api/meds/${first}/relief`,
+      { method: "POST", headers: authed, body: JSON.stringify({ relief_severity: 2 }) },
+      env(d1)
+    );
+
+    const listRes = await app.request("/api/episodes", { headers: authed }, env(d1));
+    const list = (await listRes.json()) as Array<{
+      id: number;
+      dose_count: number;
+      dose_relief_count: number;
+    }>;
+    const row = list.find((r) => r.id === id)!;
+    expect(row.dose_count).toBe(2);
+    expect(row.dose_relief_count).toBe(1);
+  });
+
+  it("reports zero doses rather than null for an episode with none", async () => {
+    await openEpisode(d1);
+    const listRes = await app.request("/api/episodes", { headers: authed }, env(d1));
+    const list = (await listRes.json()) as Array<{ dose_count: number }>;
+    expect(list[0].dose_count).toBe(0);
+  });
+
   it("deletes a dose logged by mistake so it stops counting", async () => {
     const id = await openEpisode(d1);
     const doseRes = await app.request(
