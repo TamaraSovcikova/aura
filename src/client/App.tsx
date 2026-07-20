@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Episode, MedDose } from "../shared/types";
+import type { CycleEvent, Episode, MedDose } from "../shared/types";
 import { formatDuration } from "../shared/format";
 import {
   apiCurrent,
+  apiCycleDelete,
+  apiCycleList,
   apiDelete,
   apiDeleteDose,
+  apiLogPeriod,
   apiEnd,
   apiList,
   apiListDoses,
@@ -36,7 +39,7 @@ import { ESTIMATE, attackTimes, clockHM, isoWithClock, minusMinutes, nowIso } fr
 import History from "./History";
 import { type Attrs, emptyAttrs, attrsEmpty } from "./SymptomDetails";
 import { parseRegions } from "../shared/headmap";
-import Insights from "./Insights";
+import Insights, { todayLocal } from "./Insights";
 import SeverityInput from "./SeverityInput";
 import AttackSheet, { type AttackDraft, type DoseView } from "./AttackSheet";
 import {
@@ -120,6 +123,7 @@ export default function App() {
   const [editDoses, setEditDoses] = useState<MedDose[]>([]);
   const [editing, setEditing] = useState<Episode | null>(null);
   const [premLoggedAt, setPremLoggedAt] = useState<string | null>(null);
+  const [cycleEvents, setCycleEvents] = useState<CycleEvent[]>([]);
   const [pending, setPending] = useState(0);
   const [online, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine
@@ -162,6 +166,44 @@ export default function App() {
       setError("Sync hit an unexpected problem. Your logs are safe on this phone.");
     }
   }, []);
+
+  // Logging a period is a capture, so it lives here with the other one-tap logs
+  // rather than on the read screen. Insights keeps the cycle ANALYSIS.
+  const refreshCycle = useCallback(async () => {
+    try {
+      setCycleEvents(await apiCycleList());
+    } catch {
+      /* offline: the button still works next time */
+    }
+  }, []);
+
+  const onLogPeriod = useCallback(async () => {
+    try {
+      await apiLogPeriod(todayLocal());
+      await refreshCycle();
+      setError(null);
+    } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        setError("That PIN was rejected. Enter it again.");
+        setPinReady(false);
+      }
+    }
+  }, [refreshCycle]);
+
+  const onUndoPeriod = useCallback(
+    async (id: number) => {
+      try {
+        await apiCycleDelete(id);
+        await refreshCycle();
+      } catch (e) {
+        if (e instanceof UnauthorizedError) {
+          setError("That PIN was rejected. Enter it again.");
+          setPinReady(false);
+        }
+      }
+    },
+    [refreshCycle]
+  );
 
   // Flush any premonitions queued while offline.
   const flushPremonitions = useCallback(async () => {
@@ -211,11 +253,12 @@ export default function App() {
       await flushPremonitions();
       await runSync();
       await refreshRecent();
+      await refreshCycle();
     })();
     return () => {
       cancelled = true;
     };
-  }, [pinReady, runSync, refreshRecent, flushPremonitions]);
+  }, [pinReady, runSync, refreshRecent, flushPremonitions, refreshCycle]);
 
   // The log is a tab of its own now, so refresh it when she opens it. Adjusting a
   // start, ending an attack or logging a dose all change rows that were fetched
@@ -633,6 +676,8 @@ export default function App() {
       })
     : null;
 
+  const periodToday = cycleEvents.find((e) => e.local_date === todayLocal()) ?? null;
+
   // The edit sheet, built once and rendered from whichever tab opened it.
   const editSheet = editing ? (
     <AttackSheet
@@ -730,9 +775,9 @@ export default function App() {
               <span className="mt-2 text-sm opacity-80">tap to start</span>
             </button>
 
-            {/* The premonition. One tap, no follow-up, never linked to an attack by
-                hand. Deliberately quiet so it cannot compete with the capture button,
-                and absent DURING an attack, where "I feel one coming" is nonsense. */}
+            {/* The other one-tap logs. Quiet, so they cannot compete with the capture
+                button, and absent DURING an attack: "I feel one coming" is nonsense
+                mid-attack, and a period start is not what she is reaching for then. */}
             {premLoggedAt ? (
               <p className="rounded-full bg-zinc-800 px-4 py-2 text-sm text-accent-400">
                 Noted at {clockHM(premLoggedAt)}
@@ -743,6 +788,25 @@ export default function App() {
                 className="rounded-full border border-zinc-700 px-5 py-2 text-sm text-zinc-300 transition active:scale-95 active:bg-zinc-800"
               >
                 I feel one coming
+              </button>
+            )}
+
+            {periodToday ? (
+              <p className="flex items-center gap-2 text-xs text-zinc-400">
+                Period logged today
+                <button
+                  onClick={() => onUndoPeriod(periodToday.id)}
+                  className="underline underline-offset-2"
+                >
+                  undo
+                </button>
+              </p>
+            ) : (
+              <button
+                onClick={onLogPeriod}
+                className="flex min-h-11 items-center px-2 text-xs text-zinc-400 underline underline-offset-2"
+              >
+                Period started today
               </button>
             )}
           </>
