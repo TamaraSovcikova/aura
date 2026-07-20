@@ -99,6 +99,27 @@ describe("medication dose endpoints", () => {
     expect(relRes.status).toBe(400);
   });
 
+  it("deletes a dose logged by mistake so it stops counting", async () => {
+    const id = await openEpisode(d1);
+    const doseRes = await app.request(
+      `/api/episodes/${id}/meds`,
+      { method: "POST", headers: authed, body: JSON.stringify({ name: "Sumatriptan" }) },
+      env(d1)
+    );
+    const doseId = ((await doseRes.json()) as { id: number }).id;
+
+    const del = await app.request(`/api/meds/${doseId}`, { method: "DELETE", headers: authed }, env(d1));
+    expect(del.status).toBe(200);
+
+    const listRes = await app.request(`/api/episodes/${id}/meds`, { headers: authed }, env(d1));
+    expect((await listRes.json()) as unknown[]).toHaveLength(0);
+  });
+
+  it("reports a missing dose rather than pretending the delete worked", async () => {
+    const res = await app.request(`/api/meds/9999`, { method: "DELETE", headers: authed }, env(d1));
+    expect(res.status).toBe(404);
+  });
+
   it("cascade-deletes doses when the episode is deleted", async () => {
     const id = await openEpisode(d1);
     await app.request(

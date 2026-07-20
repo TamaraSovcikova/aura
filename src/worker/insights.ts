@@ -8,6 +8,7 @@
 
 import { headacheDaysTrend, monthSeries, monthlyHeadacheDays, type MonthPoint, type TrendResult } from "./stats";
 import { medicationDays, ICHD3_THRESHOLDS, type MedMonth } from "../shared/meds";
+import { localDate } from "./db";
 import { triggerAnalysis } from "./triggers";
 import { premonitionStats } from "./stats";
 import { menstrualAnalysis } from "./cycle";
@@ -106,10 +107,30 @@ export async function buildSummary(db: D1Database): Promise<Summary> {
     )
     .all<{ severity: number; n: number }>();
 
+  // Acute-medication days come from BOTH records, deduplicated by day inside
+  // medicationDays(). Structured doses are the source of truth going forward; the
+  // free-text `meds` field is what the imported diary and older entries carry, and
+  // dropping it would erase most of the history from the overuse counter.
   const medRows = await db
     .prepare(`SELECT local_date, meds FROM episodes WHERE meds IS NOT NULL AND meds <> ''`)
     .all<{ local_date: string; meds: string }>();
-  const meds = medicationDays(medRows.results);
+  // A dose is counted on the day it was TAKEN, which is not always the day the
+  // attack started: one that runs past midnight is treated overnight, and ICHD-3
+  // counts the day of the medication.
+  const doseRows = await db
+    .prepare(
+      `SELECT d.name AS meds, d.taken_at AS taken_at, e.tz AS tz
+         FROM med_doses d JOIN episodes e ON e.id = d.episode_id`
+    )
+    .all<{ meds: string | null; taken_at: string; tz: string | null }>();
+  const meds = medicationDays([
+    ...medRows.results,
+    ...doseRows.results.map((d) => ({
+      local_date: localDate(d.taken_at, d.tz),
+      meds: d.meds,
+      is_dose: true,
+    })),
+  ]);
 
   const control = await db
     .prepare(

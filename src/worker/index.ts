@@ -258,6 +258,19 @@ app.post("/api/meds/:doseId/relief", async (c) => {
   return c.json(row);
 });
 
+// Remove a dose logged by mistake. Doses are the source of truth for medication
+// now, and they feed the ICHD-3 overuse day count, so a mis-tap has to be
+// correctable rather than permanently inflating a clinical number.
+app.delete("/api/meds/:doseId", async (c) => {
+  const doseId = Number(c.req.param("doseId"));
+  if (!Number.isInteger(doseId)) return c.json({ error: "bad id" }, 400);
+  const row = await c.env.DB.prepare(`DELETE FROM med_doses WHERE id = ? RETURNING id`)
+    .bind(doseId)
+    .first<{ id: number }>();
+  if (!row) return c.json({ error: "not found" }, 404);
+  return c.json({ ok: true });
+});
+
 // Doses for an episode, oldest first (the order they were taken).
 app.get("/api/episodes/:id/meds", async (c) => {
   const episodeId = Number(c.req.param("id"));

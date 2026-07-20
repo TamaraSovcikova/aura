@@ -1,16 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  SEVERITY_MAX,
-  SEVERITY_MIN,
-  SEVERITY_QUICK,
-  type Episode,
-} from "../shared/types";
+import { useCallback, useEffect, useState } from "react";
+import type { Episode, MedDose } from "../shared/types";
 import { formatDuration } from "../shared/format";
 import {
   apiCurrent,
   apiDelete,
+  apiDeleteDose,
   apiEnd,
   apiList,
+  apiListDoses,
   apiLogDose,
   apiLogRelief,
   apiPatch,
@@ -27,6 +24,7 @@ import {
   newLocalEpisode,
   reconcile,
   saveOutbox,
+  type LocalDose,
   type LocalEpisode,
   type DoseFn,
   type EndFn,
@@ -34,21 +32,13 @@ import {
   type StartFn,
 } from "./outbox";
 import { currentTz, getCoords } from "./geo";
-import {
-  ESTIMATE,
-  attackTimes,
-  clockHM,
-  isoToLocalInput,
-  isoWithClock,
-  localInputToIso,
-  minusMinutes,
-  nowIso,
-} from "./time";
+import { ESTIMATE, attackTimes, clockHM, isoWithClock, minusMinutes, nowIso } from "./time";
 import History from "./History";
-import SymptomDetails, { type Attrs, emptyAttrs, attrsEmpty } from "./SymptomDetails";
+import { type Attrs, emptyAttrs, attrsEmpty } from "./SymptomDetails";
 import { parseRegions } from "../shared/headmap";
 import Insights from "./Insights";
-import { appendTranscript, listen, supportsVoice } from "./voice";
+import SeverityInput from "./SeverityInput";
+import AttackSheet, { type AttackDraft, type DoseView } from "./AttackSheet";
 import {
   loadPremOutbox,
   newPremonition,
@@ -88,6 +78,23 @@ const sendPremFn = async (p: {
   });
 };
 
+/** The two dose shapes (queued locally, stored on the server) rendered by one sheet. */
+const localDoseToView = (d: LocalDose): DoseView => ({
+  key: d.localId,
+  name: d.name,
+  taken_at: d.taken_at,
+  relief_at: d.relief_at,
+  relief_severity: d.relief_severity,
+});
+
+const doseToView = (d: MedDose): DoseView => ({
+  key: String(d.id),
+  name: d.name,
+  taken_at: d.taken_at,
+  relief_at: d.relief_at,
+  relief_severity: d.relief_severity,
+});
+
 function pendingCount(list: LocalEpisode[]): number {
   return list.filter((e) => !e.startedSynced || (e.ended_at && !e.endedSynced))
     .length;
@@ -110,6 +117,7 @@ export default function App() {
   const [nowTs, setNowTs] = useState(Date.now());
   const [recent, setRecent] = useState<Episode[]>([]);
   const [endPanel, setEndPanel] = useState<LocalEpisode | null>(null);
+  const [editDoses, setEditDoses] = useState<MedDose[]>([]);
   const [editing, setEditing] = useState<Episode | null>(null);
   const [premLoggedAt, setPremLoggedAt] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
@@ -431,26 +439,18 @@ export default function App() {
   }, []);
 
   const finishDetails = useCallback(
-    (
-      details:
-        | {
-            severity: number | null;
-            meds: string;
-            note: string;
-            ended_at: string;
-            attrs: Attrs;
-          }
-        | null
-    ) => {
+    (details: AttackDraft | null) => {
       if (details && endPanel) {
         const list = loadOutbox();
         const rec = list.find((x) => x.localId === endPanel.localId);
         if (rec && !rec.endedSynced) {
           rec.severity = details.severity;
-          rec.meds = details.meds.trim() || null;
           rec.note = details.note.trim() || null;
-          // She may know the attack ended earlier than she remembered to tap.
-          rec.ended_at = details.ended_at;
+          // The sheet can correct BOTH ends of the attack now, not just when it
+          // finished: she may also realise the onset was earlier than she tapped.
+          rec.started_at = details.started_at;
+          rec.time_known = details.started_at_time_known;
+          if (details.ended_at) rec.ended_at = details.ended_at;
           rec.attrs = attrsEmpty(details.attrs) ? null : details.attrs;
           saveOutbox(list);
         }
@@ -462,11 +462,12 @@ export default function App() {
   );
 
   const onSaveEdit = useCallback(
-    async (id: number, patch: EditPatch) => {
+    async (id: number, patch: AttackDraft) => {
       try {
         await apiPatch(id, {
           severity: patch.severity,
-          meds: patch.meds.trim() || null,
+          // `meds` is deliberately not sent: medication is the structured dose now,
+          // and the legacy free text on old records is preserved as written.
           note: patch.note.trim() || null,
           started_at: patch.started_at,
           // A corrected end is optional; only send it when one is set, so clearing
@@ -493,6 +494,101 @@ export default function App() {
       refreshRecent();
     },
     [refreshRecent]
+  );
+
+  // --- Doses on a queued attack (the just-ended sheet) ----------------------
+  // Targeted by localId rather than "whichever attack is open", because the sheet
+  // appears once the attack has ENDED and so no longer counts as open.
+  const mutateOutboxRecord = useCallback(
+    (localId: string, fn: (r: LocalEpisode) => void) => {
+      const list = loadOutbox();
+      const rec = list.find((x) => x.localId === localId);
+      if (!rec) return;
+      fn(rec);
+      saveOutbox(list);
+      setOpen(findOpen(list) ?? null);
+      setEndPanel((cur) => (cur && cur.localId === localId ? { ...rec } : cur));
+      runSync();
+    },
+    [runSync]
+  );
+
+  const onLogDoseAt = useCallback(
+    (localId: string, name: string | null, takenAt: string) => {
+      mutateOutboxRecord(localId, (r) => {
+        r.doses.push(newLocalDose({ name: name?.trim() || null, taken_at: takenAt }));
+      });
+    },
+    [mutateOutboxRecord]
+  );
+
+  const onLogReliefFor = useCallback(
+    (localId: string, key: string, reliefAt: string, residual: number | null) => {
+      mutateOutboxRecord(localId, (r) => {
+        const d = r.doses.find((x) => x.localId === key);
+        if (d) {
+          d.relief_at = reliefAt;
+          d.relief_severity = residual;
+        }
+      });
+    },
+    [mutateOutboxRecord]
+  );
+
+  const onDeleteDoseLocal = useCallback(
+    (localId: string, key: string) => {
+      // If it already reached the server, remove it there too, or the overuse day
+      // count would keep a dose she has just taken back.
+      const dose = loadOutbox()
+        .find((x) => x.localId === localId)
+        ?.doses.find((d) => d.localId === key);
+      if (dose?.serverId != null) {
+        void apiDeleteDose(dose.serverId).catch(() => {
+          /* offline: the local removal still stands */
+        });
+      }
+      mutateOutboxRecord(localId, (r) => {
+        r.doses = r.doses.filter((d) => d.localId !== key);
+      });
+    },
+    [mutateOutboxRecord]
+  );
+
+  // --- Doses on a stored episode (the edit sheet) --------------------------
+  // The live attack keeps its doses in the outbox; a stored one reads and writes
+  // them through the API. Both feed the same sheet, so a dose can be added, relieved
+  // or removed long after the attack ended, not only while it was running.
+  const loadEditDoses = useCallback(async (episodeId: number) => {
+    try {
+      setEditDoses(await apiListDoses(episodeId));
+    } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        setError("That PIN was rejected. Enter it again.");
+        setPinReady(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (editing) void loadEditDoses(editing.id);
+    else setEditDoses([]);
+  }, [editing, loadEditDoses]);
+
+  const editDoseOp = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      if (!editing) return;
+      try {
+        await fn();
+        await loadEditDoses(editing.id);
+        setError(null);
+      } catch (e) {
+        if (e instanceof UnauthorizedError) {
+          setError("That PIN was rejected. Enter it again.");
+          setPinReady(false);
+        }
+      }
+    },
+    [editing, loadEditDoses]
   );
 
   const onDeleteEpisode = useCallback(
@@ -535,6 +631,40 @@ export default function App() {
       })
     : null;
 
+  // The edit sheet, built once and rendered from whichever tab opened it.
+  const editSheet = editing ? (
+    <AttackSheet
+      title="Edit entry"
+      initial={{
+        started_at: editing.started_at,
+        started_at_time_known: editing.started_at_time_known !== 0,
+        ended_at: editing.ended_at,
+        severity: editing.severity,
+        note: editing.note ?? "",
+        attrs: episodeToAttrs(editing),
+      }}
+      doses={editDoses.map(doseToView)}
+      legacyMeds={editing.meds}
+      // An old entry is edited with absolute times; "30m ago" would be meaningless.
+      allowRelative={false}
+      onSave={(patch) => onSaveEdit(editing.id, patch)}
+      onCancel={() => setEditing(null)}
+      onDelete={() => onDeleteEpisode(editing.id)}
+      onAddDose={(name, takenAt) =>
+        editDoseOp(() => apiLogDose(editing.id, { name, client_taken_at: takenAt }))
+      }
+      onLogRelief={(key, reliefAt, residual) =>
+        editDoseOp(() =>
+          apiLogRelief(Number(key), {
+            relief_severity: residual ?? undefined,
+            client_relief_at: reliefAt,
+          })
+        )
+      }
+      onDeleteDose={(key) => editDoseOp(() => apiDeleteDose(Number(key)))}
+    />
+  ) : null;
+
   const shell = (children: React.ReactNode) => (
     <div className="mx-auto flex min-h-full max-w-md flex-col px-6 pb-28 pt-8">
       <header className="mb-8 flex items-center justify-between">
@@ -554,14 +684,7 @@ export default function App() {
     return shell(
       <>
         <History episodes={recent} onSelect={setEditing} />
-        {editing && (
-          <EditPanel
-            episode={editing}
-            onSave={(patch) => onSaveEdit(editing.id, patch)}
-            onDelete={() => onDeleteEpisode(editing.id)}
-            onCancel={() => setEditing(null)}
-          />
-        )}
+        {editSheet}
       </>
     );
   }
@@ -627,20 +750,33 @@ export default function App() {
       </main>
 
       {endPanel && (
-        <EndPanel
+        <AttackSheet
+          title="How was it?"
+          initial={{
+            started_at: endPanel.started_at,
+            started_at_time_known: endPanel.time_known,
+            ended_at: endPanel.ended_at,
+            severity: endPanel.severity,
+            note: endPanel.note ?? "",
+            attrs: endPanel.attrs ?? emptyAttrs(),
+          }}
+          doses={(endPanel.doses ?? []).map(localDoseToView)}
+          legacyMeds={endPanel.meds}
+          // It has just ended, so "30m ago" is the natural way to correct a time.
+          allowRelative
+          saveLabel="Save"
+          cancelLabel="Skip"
           onSave={(d) => finishDetails(d)}
-          onSkip={() => finishDetails(null)}
+          onCancel={() => finishDetails(null)}
+          onAddDose={(name, takenAt) => onLogDoseAt(endPanel.localId, name, takenAt)}
+          onLogRelief={(key, reliefAt, residual) =>
+            onLogReliefFor(endPanel.localId, key, reliefAt, residual)
+          }
+          onDeleteDose={(key) => onDeleteDoseLocal(endPanel.localId, key)}
         />
       )}
 
-      {editing && (
-        <EditPanel
-          episode={editing}
-          onSave={(patch) => onSaveEdit(editing.id, patch)}
-          onDelete={() => onDeleteEpisode(editing.id)}
-          onCancel={() => setEditing(null)}
-        />
-      )}
+      {editSheet}
 
       <TabBar tab={tab} onChange={setTab} />
     </div>
@@ -693,16 +829,6 @@ function StatusPill({ online, pending }: { online: boolean; pending: number }) {
   );
 }
 
-interface EditPatch {
-  severity: number | null;
-  meds: string;
-  note: string;
-  started_at: string;
-  ended_at: string | null;
-  started_at_time_known: boolean;
-  attrs: Attrs;
-}
-
 const numToBool = (v: number | null | undefined): boolean | null =>
   v == null ? null : Boolean(v);
 
@@ -716,226 +842,6 @@ const episodeToAttrs = (e: Episode): Attrs => ({
   phonophobia: numToBool(e.phonophobia),
   aura: numToBool(e.aura),
 });
-
-function EditPanel({
-  episode,
-  onSave,
-  onDelete,
-  onCancel,
-}: {
-  episode: Episode;
-  onSave: (d: EditPatch) => void;
-  onDelete: () => void;
-  onCancel: () => void;
-}) {
-  const [severity, setSeverity] = useState<number | null>(episode.severity);
-  const [meds, setMeds] = useState(episode.meds ?? "");
-  const [note, setNote] = useState(episode.note ?? "");
-  const [startInput, setStartInput] = useState(isoToLocalInput(episode.started_at));
-  const [endInput, setEndInput] = useState(
-    episode.ended_at ? isoToLocalInput(episode.ended_at) : ""
-  );
-  const [timeKnown, setTimeKnown] = useState(episode.started_at_time_known !== 0);
-  const [attrs, setAttrs] = useState<Attrs>(episodeToAttrs(episode));
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  const startIso = localInputToIso(startInput);
-  const endIso = endInput ? localInputToIso(endInput) : null;
-  // Guard against a fat-fingered edit that would make the attack end before it began.
-  const endBeforeStart = startIso !== null && endIso !== null && endIso < startIso;
-  const canSave = startIso !== null && !endBeforeStart;
-
-  const save = () => {
-    if (!startIso) return;
-    onSave({
-      severity,
-      meds,
-      note,
-      started_at: startIso,
-      ended_at: endIso,
-      started_at_time_known: timeKnown,
-      attrs,
-    });
-  };
-
-  return (
-    <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6">
-      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-zinc-900 p-6 sm:rounded-2xl">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-base font-semibold text-zinc-100">Edit entry</h3>
-          <span className="text-xs text-zinc-400">
-            {episode.source && episode.source !== "app" ? "imported" : "logged"}
-          </span>
-        </div>
-
-        {/* Editing happens after the fact, so precise times are affordable here. */}
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-zinc-400">
-          Started
-        </p>
-        <input
-          type="datetime-local"
-          value={startInput}
-          onChange={(e) => setStartInput(e.target.value)}
-          className="w-full rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none"
-        />
-        <label className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
-          <input
-            type="checkbox"
-            checked={timeKnown}
-            onChange={(e) => setTimeKnown(e.target.checked)}
-            className="accent-accent-500"
-          />
-          I know the onset time (uncheck if it woke you or you noticed late)
-        </label>
-
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-zinc-400">
-          Ended
-        </p>
-        <input
-          type="datetime-local"
-          value={endInput}
-          onChange={(e) => setEndInput(e.target.value)}
-          className="w-full rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none"
-        />
-        {endBeforeStart && (
-          <p className="mt-1 text-xs text-rose-400">
-            The end is before the start.
-          </p>
-        )}
-
-        <div className="mt-4">
-          <SeverityInput value={severity} onChange={setSeverity} />
-        </div>
-
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-zinc-400">
-          Meds taken
-        </p>
-        <input
-          value={meds}
-          onChange={(e) => setMeds(e.target.value)}
-          placeholder="e.g. sumatriptan 50mg"
-          className="w-full rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-400 outline-none"
-        />
-
-        <VoiceNoteField value={note} onChange={setNote} />
-
-        <p className="mt-5 mb-1 text-xs uppercase tracking-wide text-zinc-400">
-          Symptoms
-        </p>
-        <SymptomDetails value={attrs} onChange={setAttrs} />
-
-        {confirmDelete ? (
-          <div className="mt-6 rounded-lg bg-rose-950/40 p-3">
-            <p className="text-sm text-rose-200">Delete this entry for good?</p>
-            <div className="mt-3 flex gap-3">
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="min-h-11 flex-1 rounded-lg bg-zinc-800 py-2 text-sm text-zinc-300"
-              >
-                Keep
-              </button>
-              <button
-                onClick={onDelete}
-                className="min-h-11 flex-1 rounded-lg bg-rose-600 py-2 text-sm font-medium text-white"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-6 flex items-center gap-3">
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="rounded-lg px-3 py-3 text-sm text-rose-400"
-            >
-              Delete
-            </button>
-            <button
-              onClick={onCancel}
-              className="ml-auto rounded-lg bg-zinc-800 px-5 py-3 text-sm text-zinc-300"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={save}
-              disabled={!canSave}
-              className="rounded-lg bg-accent-500 px-5 py-3 text-sm font-medium text-white disabled:opacity-40"
-            >
-              Save
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Note field with dictation. A recording APPENDS to whatever is already in the
- * note (captured when recording starts) and rides through long pauses; tap again
- * to stop.
- */
-function VoiceNoteField({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  const [listening, setListening] = useState(false);
-  const stopRef = useRef<(() => void) | null>(null);
-
-  // Never leave the mic running if the panel closes mid-recording.
-  useEffect(() => () => stopRef.current?.(), []);
-
-  const toggle = () => {
-    if (listening) {
-      stopRef.current?.();
-      return;
-    }
-    const base = value; // freeze what's already typed/dictated
-    setListening(true);
-    stopRef.current = listen(
-      (sessionText) => onChange(appendTranscript(base, sessionText)),
-      () => {
-        setListening(false);
-        stopRef.current = null;
-      }
-    );
-  };
-
-  return (
-    <>
-      <div className="mt-4 mb-2 flex items-center justify-between">
-        <p className="text-xs uppercase tracking-wide text-zinc-400">Note</p>
-        {supportsVoice() && (
-          <button
-            onClick={toggle}
-            className={`rounded-full px-3 py-1 text-xs transition ${
-              listening
-                ? "bg-rose-500 text-white"
-                : "bg-zinc-800 text-zinc-300"
-            }`}
-          >
-            {listening ? "● Listening, tap to stop" : "🎤 Voice"}
-          </button>
-        )}
-      </div>
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        rows={3}
-        placeholder="woke up with it, behind left eye…"
-        className="w-full resize-none rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-400 outline-none"
-      />
-      {listening && (
-        <p className="mt-1 text-xs text-zinc-400">
-          Take your time. Pauses are fine.
-        </p>
-      )}
-    </>
-  );
-}
 
 /**
  * Backdate the start of an in-progress attack. Quiet by default so it never
@@ -1167,173 +1073,6 @@ function MedPanel({
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-/** One severity control, used identically when ending an attack and when editing it
- *  later. Quick presets for a fast tap mid-migraine, a slider underneath for the
- *  exact 0-10 when there is time. Same everywhere, so the two never feel different. */
-function SeverityInput({
-  value,
-  onChange,
-}: {
-  value: number | null;
-  onChange: (v: number | null) => void;
-}) {
-  return (
-    <div>
-      <div className="mb-2 flex items-baseline justify-between">
-        <p className="text-xs uppercase tracking-wide text-zinc-400">Severity</p>
-        <span className="text-sm tabular-nums text-zinc-300">
-          {value === null ? "not set" : `${value}/${SEVERITY_MAX}`}
-        </span>
-      </div>
-      <div className="flex gap-2">
-        {SEVERITY_QUICK.map((l) => (
-          <button
-            key={l.level}
-            onClick={() => onChange(value === l.level ? null : l.level)}
-            className={`flex min-h-11 flex-1 items-center justify-center rounded-lg px-3 text-sm transition ${
-              value === l.level ? "bg-accent-500 text-white" : "bg-zinc-800 text-zinc-300"
-            }`}
-          >
-            {l.label}
-          </button>
-        ))}
-      </div>
-      <input
-        type="range"
-        min={SEVERITY_MIN}
-        max={SEVERITY_MAX}
-        step={1}
-        value={value ?? 0}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="mt-3 w-full accent-accent-500"
-      />
-      <div className="flex justify-between text-[10px] text-zinc-400">
-        <span>0 none</span>
-        <span>10 worst</span>
-      </div>
-      {value !== null && (
-        <button
-          onClick={() => onChange(null)}
-          className="mt-1 flex min-h-11 items-center px-1 text-xs text-zinc-400 underline"
-        >
-          clear
-        </button>
-      )}
-    </div>
-  );
-}
-
-const END_OFFSETS = [
-  { label: "Just now", min: 0 },
-  { label: "~30 min ago", min: 30 },
-  { label: "~1 hr ago", min: 60 },
-  { label: "~2 hr ago", min: 120 },
-];
-
-function EndPanel({
-  onSave,
-  onSkip,
-}: {
-  onSave: (d: {
-    severity: number | null;
-    meds: string;
-    note: string;
-    ended_at: string;
-    attrs: Attrs;
-  }) => void;
-  onSkip: () => void;
-}) {
-  const [severity, setSeverity] = useState<number | null>(null);
-  const [meds, setMeds] = useState("");
-  const [note, setNote] = useState("");
-  const [endMin, setEndMin] = useState(0);
-  const [attrs, setAttrs] = useState<Attrs>(emptyAttrs());
-  const [showSymptoms, setShowSymptoms] = useState(false);
-
-  return (
-    <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6">
-      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-zinc-900 p-6 sm:rounded-2xl">
-        <h3 className="text-base font-semibold text-zinc-100">
-          How was it? (optional)
-        </h3>
-
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-zinc-400">
-          Ended
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {END_OFFSETS.map((o) => (
-            <button
-              key={o.min}
-              onClick={() => setEndMin(o.min)}
-              className={`flex min-h-11 items-center rounded-lg px-4 text-sm transition ${
-                endMin === o.min
-                  ? "bg-accent-500 text-white"
-                  : "bg-zinc-800 text-zinc-300"
-              }`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-4">
-          <SeverityInput value={severity} onChange={setSeverity} />
-        </div>
-
-        <p className="mt-4 mb-2 text-xs uppercase tracking-wide text-zinc-400">
-          Meds taken
-        </p>
-        <input
-          value={meds}
-          onChange={(e) => setMeds(e.target.value)}
-          placeholder="e.g. sumatriptan 50mg"
-          className="w-full rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-400 outline-none"
-        />
-
-        <VoiceNoteField value={note} onChange={setNote} />
-
-        {/* The ICHD-3 attributes. Optional and collapsed, so ending an attack stays
-            one tap, but a description is one tap away when she has the energy. */}
-        <div className="mt-4">
-          {showSymptoms ? (
-            <SymptomDetails value={attrs} onChange={setAttrs} />
-          ) : (
-            <button
-              onClick={() => setShowSymptoms(true)}
-              className="min-h-11 w-full rounded-lg border border-zinc-700 py-2 text-sm text-zinc-400"
-            >
-              Add symptom details (optional)
-            </button>
-          )}
-        </div>
-
-        <div className="mt-6 flex gap-3">
-          <button
-            onClick={onSkip}
-            className="flex-1 rounded-lg bg-zinc-800 py-3 text-sm text-zinc-300"
-          >
-            Skip
-          </button>
-          <button
-            onClick={() =>
-              onSave({
-                severity,
-                meds,
-                note,
-                ended_at: minusMinutes(nowIso(), endMin),
-                attrs,
-              })
-            }
-            className="flex-1 rounded-lg bg-accent-500 py-3 text-sm font-medium text-white"
-          >
-            Save
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

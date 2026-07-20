@@ -63,5 +63,11 @@ export default defineConfig({
   },
   build: { outDir: "dist/client", emptyOutDir: true },
   // In dev, `vite` serves the client and proxies API calls to `wrangler dev` (8787).
-  server: { proxy: { "/api": "http://localhost:8787" } },
+  // Overridable because the sibling Checkbox project defaults to the same port: with
+  // both running, whichever bound first answers, and Aura's API quietly serves
+  // Checkbox's routes (a 405 on a route that demonstrably exists). Start the worker
+  // elsewhere and set AURA_API to match.
+  server: {
+    proxy: { "/api": process.env.AURA_API ?? "http://localhost:8787" },
+  },
 });

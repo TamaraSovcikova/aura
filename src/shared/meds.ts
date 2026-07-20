@@ -66,22 +66,44 @@ export interface MedMonth {
   analgesic_threshold_reached: boolean;
 }
 
+export interface MedEntry {
+  local_date: string;
+  meds: string | null;
+  /**
+   * True when this row is a LOGGED DOSE rather than a free-text note.
+   *
+   * A dose she tapped is a medication day even when she never named the drug:
+   * the taking is the fact, the name is the detail. Without this, an unnamed dose
+   * classifies as "none" and vanishes from the overuse counter, which is exactly
+   * the undercount this module refuses to make elsewhere.
+   */
+  is_dose?: boolean;
+}
+
 /**
  * Count medication DAYS per month. A day counts once no matter how many entries
  * it has, and once per class: two triptan doses on one day is still one triptan
  * day, which is exactly how the ICHD-3 criteria are counted.
+ *
+ * Entries come from two places and are deduplicated by date here: structured doses
+ * (the source of truth going forward) and the legacy free-text `meds` field, which
+ * the imported diary and older entries still carry. A day recorded both ways counts
+ * once.
  */
-export function medicationDays(
-  entries: Array<{ local_date: string; meds: string | null }>
-): MedMonth[] {
+export function medicationDays(entries: MedEntry[]): MedMonth[] {
   const byMonth = new Map<
     string,
     { any: Set<string>; triptan: Set<string>; analgesic: Set<string>; other: Set<string> }
   >();
 
   for (const e of entries) {
-    const cls = classifyMed(e.meds);
-    if (cls === "none") continue;
+    let cls = classifyMed(e.meds);
+    if (cls === "none") {
+      // A free-text "none"/"no meds" is not a medication day. A logged dose is,
+      // even unnamed: it just cannot be attributed to a threshold class.
+      if (!e.is_dose) continue;
+      cls = "other";
+    }
     const month = e.local_date.slice(0, 7);
     let m = byMonth.get(month);
     if (!m) {

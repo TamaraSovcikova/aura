@@ -161,6 +161,18 @@ export async function apiLogRelief(doseId: number, body: ReliefBody): Promise<vo
   await parse<MedDose>(r, "log relief");
 }
 
+/** Remove a dose logged by mistake. It feeds the overuse day count, so an
+ *  uncorrectable mis-tap would permanently inflate a clinical number. */
+export async function apiDeleteDose(doseId: number): Promise<void> {
+  const r = await fetch(`/api/meds/${doseId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (r.status === 401) throw new UnauthorizedError();
+  // 404 is fine: already gone.
+  if (!r.ok && r.status !== 404) throw new Error(`delete dose failed: ${r.status}`);
+}
+
 export async function apiListDoses(episodeId: number): Promise<MedDose[]> {
   const r = await fetch(`/api/episodes/${episodeId}/meds`, { headers: authHeaders() });
   return parse<MedDose[]>(r, "list doses");
