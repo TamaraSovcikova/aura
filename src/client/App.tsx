@@ -5,7 +5,7 @@ import {
   SEVERITY_QUICK,
   type Episode,
 } from "../shared/types";
-import { durationMs, formatDuration } from "../shared/format";
+import { formatDuration } from "../shared/format";
 import {
   apiCurrent,
   apiDelete,
@@ -34,7 +34,17 @@ import {
   type StartFn,
 } from "./outbox";
 import { currentTz, getCoords } from "./geo";
-import { clockHM, isoToLocalInput, localInputToIso, minusMinutes, nowIso } from "./time";
+import {
+  ESTIMATE,
+  attackTimes,
+  clockHM,
+  isoToLocalInput,
+  isoWithClock,
+  localInputToIso,
+  minusMinutes,
+  nowIso,
+} from "./time";
+import History from "./History";
 import SymptomDetails, { type Attrs, emptyAttrs, attrsEmpty } from "./SymptomDetails";
 import { parseRegions } from "../shared/headmap";
 import Insights from "./Insights";
@@ -88,7 +98,10 @@ function pendingCount(list: LocalEpisode[]): number {
 // the same launch, and resets naturally on the next real navigation.
 let deepLinkConsumed = false;
 
-type Tab = "today" | "insights";
+// Three surfaces, each with ONE job. Today captures; History is the log; Insights
+// reads. Today used to also carry the history list and the premonition button while
+// an attack was running, so five unrelated jobs sat at equal weight on one screen.
+type Tab = "today" | "history" | "insights";
 
 export default function App() {
   const [pinReady, setPinReady] = useState(hasPin());
@@ -193,6 +206,13 @@ export default function App() {
       cancelled = true;
     };
   }, [pinReady, runSync, refreshRecent, flushPremonitions]);
+
+  // The log is a tab of its own now, so refresh it when she opens it. Adjusting a
+  // start, ending an attack or logging a dose all change rows that were fetched
+  // before the change, and the list would otherwise show whatever the last sync left.
+  useEffect(() => {
+    if (tab === "history") void refreshRecent();
+  }, [tab, refreshRecent]);
 
   // Clear the "logged" confirmation after a moment.
   useEffect(() => {
@@ -504,17 +524,45 @@ export default function App() {
   const elapsed = open
     ? formatDuration(nowTs - new Date(open.started_at).getTime())
     : "";
+  // The live attack's times, decided by the same module the log and the sheets use,
+  // so the running timer and the row it becomes cannot disagree.
+  const liveTimes = open
+    ? attackTimes({
+        started_at: open.started_at,
+        ended_at: null,
+        started_at_time_known: open.time_known,
+        source: "app",
+      })
+    : null;
+
+  const shell = (children: React.ReactNode) => (
+    <div className="mx-auto flex min-h-full max-w-md flex-col px-6 pb-28 pt-8">
+      <header className="mb-8 flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight text-zinc-200">Aura</h1>
+        <StatusPill online={online} pending={pending} />
+      </header>
+      {children}
+      <TabBar tab={tab} onChange={setTab} />
+    </div>
+  );
 
   if (tab === "insights") {
-    return (
-      <div className="mx-auto flex min-h-full max-w-md flex-col px-6 pb-28 pt-8">
-        <header className="mb-8 flex items-center justify-between">
-          <h1 className="text-lg font-semibold tracking-tight text-zinc-200">Aura</h1>
-          <StatusPill online={online} pending={pending} />
-        </header>
-        <Insights onUnauthorized={handleUnauthorized} />
-        <TabBar tab={tab} onChange={setTab} />
-      </div>
+    return shell(<Insights onUnauthorized={handleUnauthorized} />);
+  }
+
+  if (tab === "history") {
+    return shell(
+      <>
+        <History episodes={recent} onSelect={setEditing} />
+        {editing && (
+          <EditPanel
+            episode={editing}
+            onSave={(patch) => onSaveEdit(editing.id, patch)}
+            onDelete={() => onDeleteEpisode(editing.id)}
+            onCancel={() => setEditing(null)}
+          />
+        )}
+      </>
     );
   }
 
@@ -529,7 +577,7 @@ export default function App() {
 
       <main className="flex flex-1 flex-col items-center justify-center gap-6">
         {open ? (
-          <div className="flex flex-col items-center gap-3">
+          <div className="flex w-full flex-col items-center gap-3">
             <button
               onClick={onEnd}
               className="flex aspect-square w-64 flex-col items-center justify-center rounded-full bg-ember-500/90 text-zinc-950 shadow-lg shadow-ember-900/40 transition active:scale-95"
@@ -538,7 +586,7 @@ export default function App() {
                 Migraine in progress
               </span>
               <span className="my-2 text-5xl font-bold tabular-nums">
-                {open.time_known ? "" : "~"}
+                {liveTimes?.estimated ? ESTIMATE : ""}
                 {elapsed}
               </span>
               <span className="text-sm opacity-80">tap when it ends</span>
@@ -547,39 +595,36 @@ export default function App() {
             <MedPanel open={open} onLogDose={onLogDose} onLogRelief={onLogRelief} />
           </div>
         ) : (
-          <button
-            onClick={onStart}
-            className="flex aspect-square w-64 flex-col items-center justify-center rounded-full bg-accent-500 text-white shadow-lg shadow-accent-900/40 transition active:scale-95"
-          >
-            <span className="text-2xl font-bold">I have a</span>
-            <span className="text-2xl font-bold">migraine</span>
-            <span className="mt-2 text-sm opacity-80">tap to start</span>
-          </button>
-        )}
+          <>
+            <button
+              onClick={onStart}
+              className="flex aspect-square w-64 flex-col items-center justify-center rounded-full bg-accent-500 text-white shadow-lg shadow-accent-900/40 transition active:scale-95"
+            >
+              <span className="text-2xl font-bold">I have a</span>
+              <span className="text-2xl font-bold">migraine</span>
+              <span className="mt-2 text-sm opacity-80">tap to start</span>
+            </button>
 
-        {/* The premonition. One tap, no follow-up, never linked to an attack by
-            hand. Deliberately quiet so it cannot compete with the capture button. */}
-        {premLoggedAt ? (
-          <p className="rounded-full bg-zinc-800 px-4 py-2 text-sm text-accent-400">
-            Noted at{" "}
-            {new Date(premLoggedAt).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </p>
-        ) : (
-          <button
-            onClick={onPremonition}
-            className="rounded-full border border-zinc-700 px-5 py-2 text-sm text-zinc-300 transition active:scale-95 active:bg-zinc-800"
-          >
-            I feel one coming
-          </button>
+            {/* The premonition. One tap, no follow-up, never linked to an attack by
+                hand. Deliberately quiet so it cannot compete with the capture button,
+                and absent DURING an attack, where "I feel one coming" is nonsense. */}
+            {premLoggedAt ? (
+              <p className="rounded-full bg-zinc-800 px-4 py-2 text-sm text-accent-400">
+                Noted at {clockHM(premLoggedAt)}
+              </p>
+            ) : (
+              <button
+                onClick={onPremonition}
+                className="rounded-full border border-zinc-700 px-5 py-2 text-sm text-zinc-300 transition active:scale-95 active:bg-zinc-800"
+              >
+                I feel one coming
+              </button>
+            )}
+          </>
         )}
 
         {error && <p className="text-sm text-rose-400">{error}</p>}
       </main>
-
-      <RecentList episodes={recent} onSelect={setEditing} />
 
       {endPanel && (
         <EndPanel
@@ -602,8 +647,8 @@ export default function App() {
   );
 }
 
-/** Two tabs, no more. Capture stays one tap from anywhere; everything derived
- *  lives behind the second, where it cannot compete with the button. */
+/** One tab per job. Capture stays one tap from anywhere; the log and the derived
+ *  numbers live behind their own tabs, where neither competes with the button. */
 function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
   const item = (id: Tab, label: string) => (
     <button
@@ -619,6 +664,7 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
     <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-800 bg-zinc-950/90 pb-[env(safe-area-inset-bottom)] backdrop-blur">
       <div className="mx-auto flex max-w-md gap-2 px-6 py-2">
         {item("today", "Today")}
+        {item("history", "History")}
         {item("insights", "Insights")}
       </div>
     </nav>
@@ -644,65 +690,6 @@ function StatusPill({ online, pending }: { online: boolean; pending: number }) {
     <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-accent-400">
       Synced
     </span>
-  );
-}
-
-function RecentList({
-  episodes,
-  onSelect,
-}: {
-  episodes: Episode[];
-  onSelect: (e: Episode) => void;
-}) {
-  if (episodes.length === 0) {
-    return (
-      <p className="mt-8 text-center text-sm text-zinc-400">
-        No migraines logged yet.
-      </p>
-    );
-  }
-  return (
-    <section className="mt-8">
-      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
-        Recent · {episodes.length}
-      </h2>
-      <ul className="divide-y divide-zinc-800 rounded-xl bg-zinc-900/60">
-        {episodes.map((e) => (
-          <li key={e.id}>
-            <button
-              onClick={() => onSelect(e)}
-              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm transition active:bg-zinc-800/60"
-            >
-              <span className="text-zinc-300">
-                {new Date(e.started_at).toLocaleString([], {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-                {e.severity !== null ? (
-                  <span className="ml-2 text-zinc-400 tabular-nums">
-                    {e.severity}/{SEVERITY_MAX}
-                  </span>
-                ) : null}
-              </span>
-              <span className="text-zinc-400 tabular-nums">
-                {e.ended_at
-                  ? // A "~" flags a duration built on an estimated onset.
-                    (e.started_at_time_known === 0 ? "~" : "") +
-                    formatDuration(durationMs(e.started_at, e.ended_at))
-                  : e.source === "app"
-                    ? "ongoing"
-                    : "—" /* imported: duration unknown, not in progress */}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      <p className="mt-2 text-center text-xs text-zinc-400">
-        Tap an entry to edit or delete it.
-      </p>
-    </section>
   );
 }
 
@@ -972,12 +959,9 @@ function StartAdjust({
   const offsets = [30, 60, 120, 180, 240];
   const offsetLabel = (m: number) => (m < 60 ? `${m}m` : `${m / 60}h`);
 
-  // Build an ISO from a typed HH:MM on today's calendar day (in the device's tz).
   // A time she types is a time she remembers, so it counts as a known onset.
   const applyExact = (hhmm: string) => {
-    if (!/^\d{2}:\d{2}$/.test(hhmm)) return;
-    const datePart = isoToLocalInput(open.started_at).slice(0, 10);
-    const iso = localInputToIso(`${datePart}T${hhmm}`);
+    const iso = isoWithClock(open.started_at, hhmm);
     if (iso) {
       onAdjust(iso, true);
       setShow(false);
@@ -985,12 +969,19 @@ function StartAdjust({
   };
 
   if (!show) {
+    // Always the clock time, marked when it is an estimate. It used to read
+    // "Started earlier" with no time whenever the onset was estimated, so the same
+    // fact appeared three different ways on one screen.
+    const t = attackTimes({
+      started_at: open.started_at,
+      started_at_time_known: open.time_known,
+    });
     return (
       <button
         onClick={() => setShow(true)}
         className="flex min-h-11 items-center px-2 text-xs text-zinc-400 underline underline-offset-2"
       >
-        Started {open.time_known ? clockHM(open.started_at) : "earlier"} · adjust
+        Started {t.start} · adjust
       </button>
     );
   }
