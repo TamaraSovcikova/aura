@@ -14,8 +14,7 @@ Migraines_AllEpisodes.csv
 
 *.local.mjs
 
-# Agent context and private notes stay local.
-CLAUDE.md
+# Private notes stay local.
 PUBLISH_READINESS.md
 
 # Build artifacts
