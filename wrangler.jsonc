@@ -26,5 +26,5 @@
     }
   ]
   // Secret (set for prod via `wrangler secret put ACCESS_PIN`; put in .dev.vars
-  // locally). When unset, the Worker allows all requests (fine for local dev).
+  // locally). When unset, the Worker refuses every API request.
 }

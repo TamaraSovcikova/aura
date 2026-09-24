@@ -1,4 +1,4 @@
 # Local Worker secrets for `wrangler dev`. Copy to .dev.vars (gitignored).
-# When ACCESS_PIN is unset, the Worker allows all requests (fine for local dev).
+# ACCESS_PIN is required: when it is unset the Worker refuses every API request.
 # In production set it with: wrangler secret put ACCESS_PIN
 ACCESS_PIN=dev-pin-change-me
