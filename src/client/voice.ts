@@ -3,12 +3,20 @@
 // falls back to the plain text field.
 //
 // Two behaviours matter for someone dictating mid-migraine:
-//  1. Long pauses must NOT end the note. Chrome ends a recognition run after a
-//     short silence, so we run `continuous` and restart on `onend`, carrying the
-//     finalized text forward. Only an explicit stop, a fatal error, or the
-//     session cap ends it.
+//  1. Long pauses must NOT end the note. Each recognition run captures one phrase
+//     and ends at a pause; we restart on `onend`, carrying the text forward. Only an
+//     explicit stop, a fatal error, or the session cap ends it.
 //  2. A recording appends to whatever is already in the note (see
 //     `appendTranscript`); it never replaces it.
+//
+// Why one phrase per run rather than `continuous`: Chrome on Android handles
+// continuous mode badly. Its results arrive cumulatively ("woke up", then "woke up
+// with it" as a separate result) and a restarted run can replay the previous
+// phrase, so appending results doubled words; and text that was still interim when
+// a run ended was thrown away, so words went missing. Now each run's results are
+// MERGED into one phrase (a result that extends the text replaces it, a repeat is
+// dropped), a replay of the previous phrase is stripped, and whatever the run heard
+// is kept when it ends, final or not.
 
 interface SpeechRecognitionResultLike extends ArrayLike<{ transcript: string }> {
   isFinal: boolean;
@@ -81,6 +89,33 @@ export function commitFinal(base: string, addition: string): string {
   return `${b} ${a}`;
 }
 
+const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+
+/**
+ * Merge one run's results into a single phrase, whatever shape the platform sends:
+ * segmented ("woke up" + "with it"), cumulative ("woke up" then "woke up with it"),
+ * or a repeat of text already held. A result that extends the phrase replaces it; a
+ * result already contained at its end is dropped; anything else is appended.
+ */
+export function mergeResults(parts: string[]): string {
+  let acc = "";
+  for (const raw of parts) {
+    const t = raw.trim();
+    if (!t) continue;
+    if (!acc || norm(t).startsWith(norm(acc))) acc = t;
+    else if (!norm(acc).endsWith(norm(t))) acc = `${acc} ${t}`;
+  }
+  return acc;
+}
+
+/** Drop a replay of the previous phrase from the start of a new run's text. */
+export function stripReplay(text: string, previous: string): string {
+  const p = norm(previous);
+  if (!p || !/\s/.test(p)) return text.trim(); // single words may legitimately repeat
+  const t = text.trim();
+  return norm(t).startsWith(p) ? t.slice(previous.trim().length).trim() : t;
+}
+
 /**
  * Start listening. `onText` receives the transcript of THIS session as it grows
  * (the caller is responsible for appending it to any pre-existing note).
@@ -97,32 +132,26 @@ export function listen(
   }
 
   let stopped = false;
-  let committed = ""; // finalized text, appended once per result, carried across restarts
+  let committed = ""; // text from finished runs, carried across restarts
+  let lastPhrase = ""; // the previous run's phrase, to strip if a new run replays it
   let current: SpeechRecognitionLike | null = null;
   const startedAt = Date.now();
 
   const startInstance = () => {
     const rec = new Ctor();
     current = rec;
+    let phrase = ""; // everything this run has heard so far, final or not
     rec.lang = navigator.language || "en-US";
     rec.interimResults = true;
-    rec.continuous = true; // ride through pauses
+    rec.continuous = false; // one phrase per run; pauses restart it (see top)
 
-    // Read only the results from `resultIndex` forward: the ones that changed in
-    // this event. Each result is appended to `committed` exactly once, when it turns
-    // final. Re-reading from index 0 (or committing a whole instance at onend) is
-    // what caused phrases to duplicate across the pause-restart cycle.
     rec.onresult = (e) => {
-      let interim = "";
-      // A fresh instance replays finals from index 0, so a missing resultIndex must
-      // start at 0, not undefined (which would skip the loop entirely).
-      for (let i = e.resultIndex ?? 0; i < e.results.length; i++) {
-        const res = e.results[i];
-        const t = res[0]?.transcript ?? "";
-        if (res.isFinal) committed = commitFinal(committed, t);
-        else interim = appendTranscript(interim, t);
-      }
-      onText(appendTranscript(committed, interim));
+      // Re-read every result of this run and merge: the platform may resend earlier
+      // results, grow one cumulatively, or change an interim guess.
+      const parts: string[] = [];
+      for (let i = 0; i < e.results.length; i++) parts.push(e.results[i][0]?.transcript ?? "");
+      phrase = stripReplay(mergeResults(parts), lastPhrase);
+      onText(commitFinal(committed, phrase));
     };
 
     rec.onerror = (e) => {
@@ -131,6 +160,13 @@ export function listen(
     };
 
     rec.onend = () => {
+      // Keep what this run heard even if it never turned final: dropping the last
+      // interim at a pause is what lost words.
+      if (phrase) {
+        committed = commitFinal(committed, phrase);
+        lastPhrase = phrase;
+        phrase = "";
+      }
       const expired = Date.now() - startedAt > MAX_SESSION_MS;
       if (stopped || expired) {
         onText(committed);

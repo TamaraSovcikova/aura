@@ -18,6 +18,9 @@ export default function VoiceNoteField({
 }) {
   const [listening, setListening] = useState(false);
   const stopRef = useRef<(() => void) | null>(null);
+  // Set when the user types mid-dictation: the recognizer still delivers a last
+  // transcript after stopping, and that must not overwrite what was typed.
+  const typedOverRef = useRef(false);
 
   // Never leave the mic running if the panel closes mid-recording.
   useEffect(() => () => stopRef.current?.(), []);
@@ -28,9 +31,12 @@ export default function VoiceNoteField({
       return;
     }
     const base = value; // freeze what's already typed/dictated
+    typedOverRef.current = false;
     setListening(true);
     stopRef.current = listen(
-      (sessionText) => onChange(appendTranscript(base, sessionText)),
+      (sessionText) => {
+        if (!typedOverRef.current) onChange(appendTranscript(base, sessionText));
+      },
       () => {
         setListening(false);
         stopRef.current = null;
@@ -40,28 +46,44 @@ export default function VoiceNoteField({
 
   return (
     <>
-      <div className="mt-5 mb-2 flex items-center justify-between">
+      <div className="mt-6 mb-2 flex items-center justify-between">
         <p className="text-xs uppercase tracking-wide text-zinc-400">Note</p>
         {supportsVoice() && (
           <button
             onClick={toggle}
-            className={`rounded-full px-3 py-1 text-xs transition ${
-              listening ? "bg-rose-500 text-white" : "bg-zinc-800 text-zinc-300"
+            aria-pressed={listening}
+            className={`flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm transition active:scale-95 ${
+              listening ? "bg-rose-500 text-white" : "bg-zinc-800 text-zinc-200"
             }`}
           >
-            {listening ? "● Listening, tap to stop" : "🎤 Voice"}
+            {listening ? (
+              <>
+                <span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-white" />
+                Stop
+              </>
+            ) : (
+              "🎤 Dictate"
+            )}
           </button>
         )}
       </div>
       <textarea
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        // Typing while dictating would be overwritten by the next phrase, so a keystroke
+        // ends the recording first and the typed text wins.
+        onChange={(e) => {
+          if (listening) {
+            typedOverRef.current = true;
+            stopRef.current?.();
+          }
+          onChange(e.target.value);
+        }}
         rows={3}
         placeholder="woke up with it, behind left eye…"
         className="w-full resize-none rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-400 outline-none"
       />
       {listening && (
-        <p className="mt-1 text-xs text-zinc-400">Take your time. Pauses are fine.</p>
+        <p className="mt-1 text-xs text-zinc-400">Listening. Take your time, pauses are fine. Tap Stop when done.</p>
       )}
     </>
   );

@@ -62,15 +62,53 @@ describe("listen", () => {
     expect(supportsVoice()).toBe(true);
   });
 
-  it("runs continuously so pauses do not cut the note off", () => {
+  it("listens one phrase per run, with live interim text", () => {
+    // Continuous mode on Android doubles and drops words; pauses are handled by
+    // restarting instead (next test).
     listen(
       () => {},
       () => {}
     );
     const rec = FakeRecognition.instances[0];
-    expect(rec.continuous).toBe(true);
+    expect(rec.continuous).toBe(false);
     expect(rec.interimResults).toBe(true);
     expect(rec.started).toBe(true);
+  });
+
+  it("does not double words when results arrive cumulatively (Android)", () => {
+    const texts: string[] = [];
+    listen((t) => texts.push(t), () => {});
+    const rec = FakeRecognition.instances[0];
+
+    // Android resends the growing phrase as a new result each time.
+    rec.emit([{ text: "woke up", final: true }, { text: "woke up with it", final: true }]);
+    expect(texts.at(-1)).toBe("woke up with it");
+
+    rec.emit([
+      { text: "woke up", final: true },
+      { text: "woke up with it", final: true },
+      { text: "woke up with it behind the eye", final: false },
+    ]);
+    expect(texts.at(-1)).toBe("woke up with it behind the eye");
+  });
+
+  it("keeps words that were still interim when a pause ended the run", () => {
+    const texts: string[] = [];
+    listen((t) => texts.push(t), () => {});
+
+    FakeRecognition.instances[0].emit([{ text: "pressure behind the eye", final: false }]);
+    FakeRecognition.instances[0].endFromSilence(); // never turned final
+    FakeRecognition.instances[1].emit([{ text: "since this morning", final: true }]);
+
+    expect(texts.at(-1)).toBe("pressure behind the eye since this morning");
+  });
+
+  it("keeps an interim phrase when the user stops mid-sentence", () => {
+    const texts: string[] = [];
+    const stop = listen((t) => texts.push(t), () => {});
+    FakeRecognition.instances[0].emit([{ text: "took half a tablet", final: false }]);
+    stop();
+    expect(texts.at(-1)).toBe("took half a tablet");
   });
 
   it("restarts after a silence gap instead of finishing", () => {
