@@ -88,12 +88,12 @@ describe("locationForDate", () => {
     expect(locationForDate("2024-08-28").tz).toBe("Europe/Vienna");
     expect(locationForDate("2025-03-01").tz).toBe("Europe/London");
     expect(locationForDate("2025-07-20").tz).toBe("Europe/Vienna");
-    expect(locationForDate("2026-03-01").tz).toBe("Europe/London");
+    expect(locationForDate("2026-03-01").tz).toBe("Europe/Berlin");
     expect(locationForDate("2026-07-05").tz).toBe("Europe/Berlin");
   });
 
   it("flags dates adjacent to a boundary", () => {
-    expect(locationForDate("2025-07-01").nearBoundary).toBe(true);
+    expect(locationForDate("2025-06-01").nearBoundary).toBe(true);
     expect(locationForDate("2025-03-01").nearBoundary).toBe(false);
   });
 });

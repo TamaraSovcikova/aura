@@ -10,8 +10,8 @@
 -- live rows are treated identically.
 --
 -- It is also what makes the trigger analysis possible at all: statistics need the
--- days she did NOT get a migraine, and those days are reconstructed here from an
--- objective archive rather than demanded from her as daily logging.
+-- days WITHOUT a migraine, and those days are reconstructed here from an
+-- objective archive rather than demanded from the user as daily logging.
 
 CREATE TABLE locations (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,13 +28,13 @@ CREATE INDEX idx_locations_range ON locations (from_date, to_date);
 -- Barometric pressure is a synoptic-scale field: towns tens of kilometres apart
 -- differ by well under 1 hPa, so one point per region is enough. The country is
 -- what matters, and that is what changes here.
+-- These rows are an EXAMPLE timeline; a real deployment seeds its own places.
 -- Must stay in sync with TIMELINE in scripts/lib/timeline.mjs (a test enforces it).
 INSERT INTO locations (from_date, to_date, place, tz, lat, lon) VALUES
-  ('2024-08-26', '2024-08-31', 'Vienna, AT', 'Europe/Vienna', 48.21, 16.37),
-  ('2024-09-01', '2025-06-30', 'London, UK',         'Europe/London',     51.51, -0.13),
-  ('2025-07-01', '2025-08-31', 'Vienna, AT', 'Europe/Vienna', 48.21, 16.37),
-  ('2025-09-01', '2026-06-30', 'London, UK',         'Europe/London',     51.51, -0.13),
-  ('2026-07-01', '2099-12-31', 'Berlin, DE',          'Europe/Berlin',   52.52, 13.40);
+  ('2024-06-01', '2024-09-30', 'Vienna, AT', 'Europe/Vienna', 48.21, 16.37),
+  ('2024-10-01', '2025-05-31', 'London, UK', 'Europe/London', 51.51, -0.13),
+  ('2025-06-01', '2025-12-31', 'Vienna, AT', 'Europe/Vienna', 48.21, 16.37),
+  ('2026-01-01', '2099-12-31', 'Berlin, DE', 'Europe/Berlin', 52.52, 13.40);
 
 -- One row per calendar day, whether or not she had a headache. These are the
 -- control days. `had_headache` is deliberately NOT stored: it is derived by
