@@ -864,8 +864,9 @@ export default function App() {
           legacyMeds={endPanel.meds}
           // It has just ended, so "30m ago" is the natural way to correct a time.
           allowRelative
-          saveLabel="Save"
-          cancelLabel="Skip"
+          subtitle="The attack is saved. Everything below is optional."
+          saveLabel="Save details"
+          cancelLabel="Skip details"
           onSave={(d) => finishDetails(d)}
           onCancel={() => finishDetails(null)}
           onAddDose={(name, takenAt) => onLogDoseAt(endPanel.localId, name, takenAt)}

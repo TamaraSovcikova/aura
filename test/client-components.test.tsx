@@ -53,34 +53,32 @@ function SymptomHarness() {
   return <SymptomDetails value={a} onChange={setA} />;
 }
 
-const nauseaChip = () => screen.getByRole("button", { name: /^Nausea:/ });
+const rowButton = (question: string, answer: string) =>
+  within(screen.getByRole("group", { name: question })).getByRole("button", { name: answer });
 
 describe("SymptomDetails tri-state", () => {
   it("keeps 'not recorded' (null) distinct from 'no' (false)", () => {
     latestAttrs = emptyAttrs();
     render(<SymptomHarness />);
-    // Default: nothing recorded, and the chip says so.
+    // Default: nothing recorded.
     expect(latestAttrs.nausea).toBeNull();
-    expect(nauseaChip()).toHaveAccessibleName("Nausea: not recorded");
 
-    fireEvent.click(nauseaChip());
+    fireEvent.click(rowButton("Nausea", "Yes"));
     expect(latestAttrs.nausea).toBe(true);
-    expect(nauseaChip()).toHaveAccessibleName("Nausea: yes");
 
-    fireEvent.click(nauseaChip());
+    fireEvent.click(rowButton("Nausea", "No"));
     expect(latestAttrs.nausea).toBe(false); // an explicit no, which the classifier uses
-    expect(nauseaChip()).toHaveTextContent("No nausea");
+    expect(rowButton("Nausea", "No")).toHaveAttribute("aria-pressed", "true");
 
-    // A third tap clears it back to unrecorded.
-    fireEvent.click(nauseaChip());
+    // Tapping the active choice again clears it back to unrecorded.
+    fireEvent.click(rowButton("Nausea", "No"));
     expect(latestAttrs.nausea).toBeNull();
   });
 
   it("records pain quality and the head map into the same attrs object", () => {
     latestAttrs = emptyAttrs();
     render(<SymptomHarness />);
-    const quality = screen.getByRole("group", { name: "Pain quality" });
-    fireEvent.click(within(quality).getByRole("button", { name: "Throbbing" }));
+    fireEvent.click(rowButton("The pain was", "Throbbing"));
     fireEvent.click(screen.getByRole("button", { name: "Left temple" }));
     expect(latestAttrs.quality).toBe("throbbing");
     expect(latestAttrs.pain_regions).toEqual(["l-temple"]);

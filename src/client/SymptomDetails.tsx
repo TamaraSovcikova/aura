@@ -5,9 +5,10 @@
 // never as a no. Nothing here is required; a skipped panel just leaves an attack
 // counted as a headache day, not a migraine day.
 //
-// The answers are chips rather than a Yes/No row each: six rows of paired buttons
-// filled a whole phone screen. A chip cycles unrecorded -> yes -> no -> unrecorded,
-// and says which state it is in words, so "no" never looks like "not asked".
+// Layout: one compact row per question, the question on the left and explicit
+// answers on the right. Tapping the chosen answer again clears it. (A single
+// cycling chip was tried: tap once for yes, twice for no. It was compact but not
+// obvious, so each answer is its own button again, just on one line.)
 
 import HeadMap from "./HeadMap";
 
@@ -43,75 +44,93 @@ export const attrsEmpty = (a: Attrs): boolean =>
 
 type BoolKey = "aggravated_by_activity" | "nausea" | "photophobia" | "phonophobia" | "aura";
 
-const SYMPTOMS: { key: BoolKey; label: string; no: string }[] = [
-  { key: "nausea", label: "Nausea", no: "No nausea" },
-  { key: "photophobia", label: "Light hurt", no: "Light was fine" },
-  { key: "phonophobia", label: "Sound hurt", no: "Sound was fine" },
-  { key: "aggravated_by_activity", label: "Worse moving", no: "Moving was fine" },
-  { key: "aura", label: "Aura", no: "No aura" },
+const QUESTIONS: { key: BoolKey; label: string }[] = [
+  { key: "nausea", label: "Nausea" },
+  { key: "photophobia", label: "Light bothered you" },
+  { key: "phonophobia", label: "Sound bothered you" },
+  { key: "aggravated_by_activity", label: "Worse when moving" },
+  { key: "aura", label: "Aura beforehand" },
 ];
 
-/** Unrecorded -> yes -> no -> unrecorded. */
-export const nextTri = (v: boolean | null): boolean | null =>
-  v === null ? true : v === true ? false : null;
-
-const chipBase =
-  "flex min-h-11 items-center gap-1.5 rounded-full border px-3.5 text-sm transition active:scale-95";
-
-function TriChip({
+function Choice<T>({
   label,
-  noLabel,
   value,
+  options,
   onChange,
 }: {
   label: string;
-  noLabel: string;
-  value: boolean | null;
-  onChange: (v: boolean | null) => void;
+  value: T | null;
+  options: { label: string; val: T }[];
+  onChange: (v: T | null) => void;
 }) {
-  const state = value === null ? "not recorded" : value ? "yes" : "no";
   return (
-    <button
-      onClick={() => onChange(nextTri(value))}
-      aria-label={`${label}: ${state}`}
-      className={`${chipBase} ${
-        value === true
-          ? "border-accent-400 bg-accent-500 text-white"
-          : value === false
-            ? "border-zinc-700 bg-zinc-900 text-zinc-500"
-            : "border-zinc-700 bg-zinc-800 text-zinc-300"
-      }`}
-    >
-      <span aria-hidden className="w-3 text-center text-xs">
-        {value === true ? "✓" : value === false ? "✕" : "+"}
-      </span>
-      {value === false ? noLabel : label}
-    </button>
+    <div className="flex items-center justify-between gap-3 py-1">
+      <span className="text-sm text-zinc-300">{label}</span>
+      <div className="flex shrink-0 gap-1.5" role="group" aria-label={label}>
+        {options.map((o) => {
+          const on = value === o.val;
+          return (
+            <button
+              key={String(o.val)}
+              // Tapping the active choice again clears it back to unrecorded.
+              onClick={() => onChange(on ? null : o.val)}
+              aria-pressed={on}
+              className={`flex min-h-11 min-w-14 items-center justify-center rounded-lg px-3 text-sm transition active:scale-95 ${
+                on ? "bg-accent-500 text-white" : "bg-zinc-800 text-zinc-400"
+              }`}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-function QualityChip({
-  label,
-  on,
-  onClick,
-}: {
-  label: string;
-  on: boolean;
-  onClick: () => void;
-}) {
+const YES_NO = [
+  { label: "Yes", val: true },
+  { label: "No", val: false },
+];
+
+/** The where: the head map on its own, so the sheet can give it its own card. */
+export function WhereItHurt({ value, onChange }: { value: Attrs; onChange: (a: Attrs) => void }) {
   return (
-    <button
-      onClick={onClick}
-      aria-pressed={on}
-      className={`${chipBase} ${
-        on ? "border-accent-400 bg-accent-500 text-white" : "border-zinc-700 bg-zinc-800 text-zinc-300"
-      }`}
-    >
-      {label}
-    </button>
+    <HeadMap
+      value={value.pain_regions}
+      onChange={(ids) => onChange({ ...value, pain_regions: ids })}
+    />
   );
 }
 
+/** The what: pain quality and the yes/no questions. */
+export function Symptoms({ value, onChange }: { value: Attrs; onChange: (a: Attrs) => void }) {
+  const set = <K extends keyof Attrs>(k: K, v: Attrs[K]) => onChange({ ...value, [k]: v });
+  return (
+    <div className="flex flex-col divide-y divide-zinc-800/80">
+      <Choice
+        label="The pain was"
+        value={value.quality}
+        options={[
+          { label: "Throbbing", val: "throbbing" as const },
+          { label: "Pressing", val: "pressing" as const },
+        ]}
+        onChange={(v) => set("quality", v)}
+      />
+      {QUESTIONS.map((q) => (
+        <Choice
+          key={q.key}
+          label={q.label}
+          value={value[q.key]}
+          options={YES_NO}
+          onChange={(v) => set(q.key, v)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Both together, for callers that want the whole panel in one place. */
 export default function SymptomDetails({
   value,
   onChange,
@@ -119,33 +138,12 @@ export default function SymptomDetails({
   value: Attrs;
   onChange: (a: Attrs) => void;
 }) {
-  const set = <K extends keyof Attrs>(k: K, v: Attrs[K]) => onChange({ ...value, [k]: v });
-  const setQuality = (q: "throbbing" | "pressing") =>
-    set("quality", value.quality === q ? null : q);
-
   return (
     <div>
-      <HeadMap value={value.pain_regions} onChange={(ids) => set("pain_regions", ids)} />
-
-      <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Pain quality">
-        <QualityChip label="Throbbing" on={value.quality === "throbbing"} onClick={() => setQuality("throbbing")} />
-        <QualityChip label="Pressing" on={value.quality === "pressing"} onClick={() => setQuality("pressing")} />
+      <WhereItHurt value={value} onChange={onChange} />
+      <div className="mt-3">
+        <Symptoms value={value} onChange={onChange} />
       </div>
-
-      <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Symptoms">
-        {SYMPTOMS.map((s) => (
-          <TriChip
-            key={s.key}
-            label={s.label}
-            noLabel={s.no}
-            value={value[s.key]}
-            onChange={(v) => set(s.key, v)}
-          />
-        ))}
-      </div>
-      <p className="mt-2 text-[11px] text-zinc-500">
-        Tap once for yes, twice for no. Untouched means not recorded.
-      </p>
     </div>
   );
 }

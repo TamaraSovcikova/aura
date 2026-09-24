@@ -46,8 +46,8 @@ export default function VoiceNoteField({
 
   return (
     <>
-      <div className="mt-6 mb-2 flex items-center justify-between">
-        <p className="text-xs uppercase tracking-wide text-zinc-400">Note</p>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-sm text-zinc-300">Anything else to remember?</p>
         {supportsVoice() && (
           <button
             onClick={toggle}

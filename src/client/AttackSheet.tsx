@@ -1,6 +1,6 @@
 import { useState } from "react";
 import SeverityInput from "./SeverityInput";
-import SymptomDetails, { type Attrs } from "./SymptomDetails";
+import { Symptoms, WhereItHurt, type Attrs } from "./SymptomDetails";
 import VoiceNoteField from "./VoiceNoteField";
 import {
   attackTimes,
@@ -22,7 +22,9 @@ import {
 // data, two layouts, two stores.
 //
 // The rules here:
-//   * One field order, both modes: when -> how bad -> medication -> note -> symptoms.
+//   * One field order, both modes: how bad -> where -> what else -> medication -> note,
+//     each a card phrased as the question it asks. The times sit above as one line,
+//     because they are usually already right.
 //   * One time editor. It always offers an absolute time; relative "N ago" chips are
 //     an affordance the caller enables when the attack is near now, not a separate UI.
 //   * Medication is the structured dose. The legacy free-text field is shown when a
@@ -141,8 +143,24 @@ function TimeEditor({
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <p className="mb-2 text-xs uppercase tracking-wide text-zinc-400">{children}</p>;
+/** One question of the sheet. A title phrased as the question, and a hint only
+ *  where the interaction is not self-evident. */
+function Card({
+  title,
+  hint,
+  children,
+}: {
+  title?: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mt-3 rounded-2xl bg-zinc-800/35 p-4">
+      {title && <h4 className="text-sm text-zinc-300">{title}</h4>}
+      {hint && <p className="mt-0.5 text-[11px] text-zinc-500">{hint}</p>}
+      <div className={title ? "mt-3" : ""}>{children}</div>
+    </section>
+  );
 }
 
 /** Medication: the doses themselves, addable and correctable at any time. */
@@ -177,8 +195,7 @@ function DoseSection({
   };
 
   return (
-    <div className="mt-6">
-      <SectionLabel>Medication</SectionLabel>
+    <div>
 
       {doses.length > 0 && (
         <ul className="mb-2 flex flex-col gap-1.5">
@@ -302,6 +319,7 @@ export default function AttackSheet({
   doses,
   legacyMeds = null,
   allowRelative,
+  subtitle,
   saveLabel = "Save",
   cancelLabel = "Cancel",
   onSave,
@@ -317,6 +335,8 @@ export default function AttackSheet({
   legacyMeds?: string | null;
   /** Enables the "N ago" chips: true when the attack is happening around now. */
   allowRelative: boolean;
+  /** One line under the title, e.g. telling the user the attack is already saved. */
+  subtitle?: string;
   saveLabel?: string;
   cancelLabel?: string;
   onSave: (d: AttackDraft) => void;
@@ -334,6 +354,7 @@ export default function AttackSheet({
   const [attrs, setAttrs] = useState<Attrs>(initial.attrs);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editing, setEditing] = useState<"start" | "end" | null>(null);
+  const [showTimes, setShowTimes] = useState(false);
 
   const endBeforeStart = endedAt !== null && endedAt < startedAt;
   const canSave = !endBeforeStart;
@@ -355,7 +376,23 @@ export default function AttackSheet({
           </span>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        {subtitle && <p className="mt-1 text-sm text-zinc-400">{subtitle}</p>}
+
+        {/* Times are usually right already, so they are one quiet line until needed. */}
+        <div className="mt-3 flex items-center justify-between gap-3 text-sm">
+          <span className="tabular-nums text-zinc-300">
+            {timeKnown ? dayClock(startedAt) : `~${dayClock(startedAt)}`} → {endedAt ? clockHM(endedAt) : "ongoing"}
+          </span>
+          <button
+            onClick={() => setShowTimes((s) => !s)}
+            aria-expanded={showTimes}
+            className="flex min-h-11 items-center text-xs text-zinc-400 underline underline-offset-2"
+          >
+            {showTimes ? "done" : "change times"}
+          </button>
+        </div>
+        {showTimes && (
+        <div className="mt-1 grid grid-cols-2 gap-2">
           <TimeCell
             label="Started"
             shown={timeKnown ? dayClock(startedAt) : `~${dayClock(startedAt)}`}
@@ -369,7 +406,8 @@ export default function AttackSheet({
             onToggle={() => setEditing((e) => (e === "end" ? null : "end"))}
           />
         </div>
-        {editing === "start" && (
+        )}
+        {showTimes && editing === "start" && (
           <TimeEditor
             label="Started"
             value={startedAt}
@@ -379,7 +417,7 @@ export default function AttackSheet({
             allowRelative={allowRelative}
           />
         )}
-        {editing === "end" && (
+        {showTimes && editing === "end" && (
           <TimeEditor
             label="Ended"
             value={endedAt}
@@ -391,28 +429,32 @@ export default function AttackSheet({
           <p className="mt-1 text-xs text-rose-400">The end is before the start.</p>
         )}
 
-        <div className="mt-6">
-          <SeverityInput
-            value={severity}
-            onChange={setSeverity}
-            label="How bad at its worst"
+        {/* The questions, one card each, in the order they are easiest to answer. */}
+        <Card>
+          <SeverityInput value={severity} onChange={setSeverity} label="How bad was it at its worst?" />
+        </Card>
+
+        <Card title="Where did it hurt?" hint="Tap every area that hurt. Tap again to undo.">
+          <WhereItHurt value={attrs} onChange={setAttrs} />
+        </Card>
+
+        <Card title="What else did you notice?" hint="Leave a question blank if you are not sure.">
+          <Symptoms value={attrs} onChange={setAttrs} />
+        </Card>
+
+        <Card title="Medication">
+          <DoseSection
+            doses={doses}
+            legacyMeds={legacyMeds}
+            onAddDose={onAddDose}
+            onLogRelief={onLogRelief}
+            onDeleteDose={onDeleteDose}
           />
-        </div>
+        </Card>
 
-        <DoseSection
-          doses={doses}
-          legacyMeds={legacyMeds}
-          onAddDose={onAddDose}
-          onLogRelief={onLogRelief}
-          onDeleteDose={onDeleteDose}
-        />
-
-        <VoiceNoteField value={note} onChange={setNote} />
-
-        <div className="mt-6">
-          <SectionLabel>Where and how it hurt</SectionLabel>
-          <SymptomDetails value={attrs} onChange={setAttrs} />
-        </div>
+        <Card>
+          <VoiceNoteField value={note} onChange={setNote} />
+        </Card>
 
         {confirmDelete ? (
           <div className="sticky bottom-0 -mx-5 mt-6 bg-zinc-900 px-5 pb-5 pt-3">
