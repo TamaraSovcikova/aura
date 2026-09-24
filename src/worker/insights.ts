@@ -248,7 +248,7 @@ export async function buildSummary(db: D1Database): Promise<Summary> {
     kind: "gated",
     title: "\"I feel one coming\"",
     body: prem.enough_data
-      ? `${Math.round((prem.hit_rate ?? 0) * 100)}% of your premonitions were followed by a headache within 24 hours, with a median lead of ${prem.lead_hours_median} hours.`
+      ? `${Math.round((prem.hit_rate ?? 0) * 100)}% of your premonitions were followed by a headache within 24 hours, with a median lead of ${(prem.lead_hours_median ?? 0).toFixed(1)} hours.`
       : `${prem.premonitions_eligible} logged so far. Needs 10 premonitions and 3 that were followed. The ones that come to nothing are the valuable half.`,
   });
 
@@ -257,7 +257,7 @@ export async function buildSummary(db: D1Database): Promise<Summary> {
     kind: "gated",
     title: "Menstrual cycle",
     body: cyc.enough_data
-      ? `Headache odds inside the perimenstrual window: ${cyc.odds_ratio}x (95% CI ${cyc.ci_low} to ${cyc.ci_high}). ${cyc.verdict}.`
+      ? `Headache odds inside the perimenstrual window: ${(cyc.odds_ratio ?? 0).toFixed(1)}x (95% CI ${(cyc.ci_low ?? 0).toFixed(1)} to ${(cyc.ci_high ?? 0).toFixed(1)}). Verdict: ${cyc.verdict}.`
       : `${cyc.period_starts_logged} period starts logged. There is no cycle data in your history, so this can only be answered by tapping once a month from now on.`,
   });
 

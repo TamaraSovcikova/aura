@@ -17,13 +17,18 @@
 // Nothing here is written by a model, and no card softens a null result.
 
 import { useCallback, useEffect, useState } from "react";
-import type { CycleEvent } from "../shared/types";
+import type { CycleEvent, Episode } from "../shared/types";
 import type { Summary } from "../worker/insights";
+import type { TriggerAnalysis, FactorResult } from "../worker/triggers";
+import type { MenstrualAnalysis } from "../worker/cycle";
 import {
+  apiCycleAnalysis,
   apiCycleList,
+  apiList,
   apiMedResponse,
   apiPatterns,
   apiSummary,
+  apiTriggers,
   exportCsvUrl,
   exportDoctorUrl,
   exportObsidianUrl,
@@ -34,6 +39,19 @@ import type { MedResponse } from "../worker/meds";
 import { cycleContext, normalizeStarts } from "../shared/cycle";
 import { localDateInTz } from "../shared/health";
 import { currentTz } from "./geo";
+import { HeadHeatMap } from "./HeadMap";
+import { HEAD_REGIONS, parseRegions } from "../shared/headmap";
+
+/** `2 Jan 2026`. Insights spans years, so unlike the log it always shows one. */
+const fullDate = (d: string) =>
+  new Date(`${d}T00:00:00Z`).toLocaleDateString([], {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 /** The calendar day where she is standing, not where UTC happens to be. */
 export const todayLocal = (): string => localDateInTz(new Date().toISOString(), currentTz());
@@ -100,7 +118,8 @@ function Headline({ s }: { s: Summary }) {
       </div>
       <p className="mt-3 text-sm text-zinc-400">
         {perMonth ? `About ${perMonth} a month. ` : ""}
-        {s.episodes} episodes, {s.first_day} to {s.last_day}.
+        {s.episodes} episodes, {s.first_day ? fullDate(s.first_day) : "?"} to{" "}
+        {s.last_day ? fullDate(s.last_day) : "?"}.
       </p>
     </section>
   );
@@ -181,26 +200,43 @@ function MigraineOrHeadache({ s }: { s: Summary }) {
   );
 }
 
+/** Vertical bars with the value printed above each, so a bar never has to be read
+ *  against an axis that is not there. */
+function Bars({ items }: { items: Array<{ key: string; label: string; value: number; shown: string }> }) {
+  const max = Math.max(0.0001, ...items.map((i) => i.value));
+  return (
+    <div className="flex items-end gap-1.5">
+      {items.map((d) => (
+        <div key={d.key} className="flex flex-1 flex-col items-center gap-1">
+          <span className="text-[10px] tabular-nums text-zinc-400">{d.shown}</span>
+          <div className="flex h-16 w-full items-end">
+            <div
+              className="w-full rounded-t bg-accent-500/80"
+              style={{ height: `${Math.max(4, (d.value / max) * 100)}%` }}
+            />
+          </div>
+          <span className="text-[10px] text-zinc-400">{d.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function WhenTheyHappen({ p }: { p: PatternsData }) {
   const dow = p.day_of_week;
   const tod = p.time_of_day;
-  const maxRate = Math.max(0.01, ...dow.per_day.map((d) => d.rate ?? 0));
   return (
     <Section title="When they happen">
       <SubHead>Across the week</SubHead>
-      <div className="flex items-end gap-1.5">
-        {dow.per_day.map((d) => (
-          <div key={d.day} className="flex flex-1 flex-col items-center gap-1">
-            <div className="flex h-16 w-full items-end">
-              <div
-                className="w-full rounded-t bg-accent-500/80"
-                style={{ height: `${((d.rate ?? 0) / maxRate) * 100}%` }}
-              />
-            </div>
-            <span className="text-[10px] text-zinc-400">{d.day.slice(0, 1)}</span>
-          </div>
-        ))}
-      </div>
+      <Bars
+        items={dow.per_day.map((d, i) => ({
+          key: `${d.day}-${i}`,
+          label: d.day.slice(0, 1),
+          value: d.rate ?? 0,
+          shown: d.rate == null ? "" : pct(d.rate),
+        }))}
+      />
+      <p className="mt-1 text-[11px] text-zinc-500">Share of each weekday that was a headache day.</p>
       <div className="mt-2">
         {dow.verdict === "insufficient data" ? (
           <Gate>Not enough days yet to say whether a weekday matters.</Gate>
@@ -215,6 +251,18 @@ function WhenTheyHappen({ p }: { p: PatternsData }) {
 
       <div className="mt-5">
         <SubHead>Across the day</SubHead>
+        {tod.verdict !== "insufficient data" && (
+          <div className="mb-2">
+            <Bars
+              items={tod.by_period.map((b) => ({
+                key: b.label,
+                label: b.label.split(" ")[0], // "morning (6-12)" -> "morning"
+                value: b.count,
+                shown: String(b.count),
+              }))}
+            />
+          </div>
+        )}
         {tod.verdict === "insufficient data" ? (
           <Gate>
             Needs 20 attacks with a known onset time ({tod.known_onset_attacks} so far).
@@ -329,47 +377,170 @@ function Medication({ s, m }: { s: Summary; m: MedResponse | null }) {
   );
 }
 
+/** Where it hurts, across every attack that had its head map painted. */
+function WhereItHurts({ episodes }: { episodes: Episode[] }) {
+  const counts: Record<string, number> = {};
+  let painted = 0;
+  for (const e of episodes) {
+    const regions = parseRegions(e.pain_regions);
+    if (regions.length) painted++;
+    for (const r of regions) counts[r] = (counts[r] ?? 0) + 1;
+  }
+  if (painted === 0) return null;
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  const topLabel = HEAD_REGIONS.find((r) => r.id === top[0])?.label ?? top[0];
+  return (
+    <Section title="Where it hurts">
+      <HeadHeatMap counts={counts} />
+      <p className="mt-2 text-sm text-zinc-200">
+        Most often: {topLabel.toLowerCase()}, in {top[1]} of {painted} attacks with a painted map.
+      </p>
+      <p className="mt-1 text-xs text-zinc-400">Deeper red means painted more often.</p>
+    </Section>
+  );
+}
+
+/**
+ * The weather test as a forest plot: for each factor, the stratified difference
+ * between headache days and other days, with its 95% interval. A whisker that
+ * crosses the centre line is "no evidence", and it is drawn that way, not softened.
+ * Each row is scaled to itself because the factors are in different units.
+ */
+function ForestRow({ f }: { f: FactorResult }) {
+  const lo = f.ci_low ?? 0;
+  const hi = f.ci_high ?? 0;
+  const span = Math.max(Math.abs(lo), Math.abs(hi), 1e-9) * 1.15;
+  const x = (v: number) => 50 + (v / span) * 50;
+  const hit = f.verdict === "possible association";
+  return (
+    <li className="py-2">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="text-zinc-300">{f.label}</span>
+        <span className={hit ? "text-rose-300" : "text-zinc-500"}>{hit ? "possible link" : "no evidence"}</span>
+      </div>
+      <svg viewBox="0 0 100 10" preserveAspectRatio="none" className="mt-1 h-3 w-full" aria-hidden>
+        <line x1={50} x2={50} y1={0} y2={10} className="stroke-zinc-600" strokeWidth={0.6} vectorEffect="non-scaling-stroke" />
+        <line x1={x(lo)} x2={x(hi)} y1={5} y2={5} className={hit ? "stroke-rose-400" : "stroke-zinc-400"} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        <rect x={x(f.adjusted_diff ?? 0) - 1} y={2} width={2} height={6} rx={1} className={hit ? "fill-rose-300" : "fill-zinc-200"} />
+      </svg>
+    </li>
+  );
+}
+
+function Weather({ t }: { t: TriggerAnalysis }) {
+  const tested = t.factors.filter((f) => f.verdict !== "insufficient data");
+  const waiting = t.factors.filter((f) => f.verdict === "insufficient data");
+  const hits = tested.filter((f) => f.verdict === "possible association");
+  const n = tested[0];
+  return (
+    <Section title="Weather and other triggers">
+      {tested.length === 0 ? (
+        <Gate>Needs more days on record before any factor can be tested.</Gate>
+      ) : (
+        <>
+          <p className="text-sm leading-relaxed text-zinc-200">
+            {hits.length
+              ? `${hits.length} of ${tested.length} factors show a possible association. An association, not a cause.`
+              : `None of ${tested.length} factors differs between headache days and other days.`}
+          </p>
+          <p className="mt-1 text-xs text-zinc-400">
+            {n.n_headache_days} headache days against {n.n_control_days} other days, compared within the
+            same place and month, corrected for testing {tested.length} factors at once.
+          </p>
+          <div className="mt-2 flex justify-between text-[10px] text-zinc-500">
+            <span>lower on headache days</span>
+            <span>higher</span>
+          </div>
+          <ul className="divide-y divide-zinc-800/70">
+            {tested.map((f) => (
+              <ForestRow key={f.factor} f={f} />
+            ))}
+          </ul>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            Each line is the 95% range of the difference. A line crossing the centre is no evidence;
+            one just clear of it can still be, because the verdict also corrects for testing several
+            factors at once and ignores differences too small to matter.
+          </p>
+        </>
+      )}
+      {waiting.length > 0 && (
+        <div className="mt-3">
+          <Gate>
+            Still collecting: {waiting.map((f) => f.label.replace(/ \(.*\)$/, "").toLowerCase()).join(", ")}.
+          </Gate>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 /** Cycle ANALYSIS only. Logging a period is a capture, and capture lives on Today:
  *  an action on the read screen was the reason "where do I log this" had no
  *  consistent answer. */
-function Cycle({ events, s }: { events: CycleEvent[]; s: Summary }) {
+function Cycle({ events, a }: { events: CycleEvent[]; a: MenstrualAnalysis | null }) {
   const starts = normalizeStarts(events.map((e) => e.local_date));
   const ctx = cycleContext(todayLocal(), starts);
-  const insight = s.insights.find((i) => i.title === "Menstrual cycle");
+  const earned = a?.enough_data && a.odds_ratio !== null;
 
   return (
     <Section title="Cycle">
-      {ctx.cycle_day !== null ? (
-        <p className="text-sm text-zinc-200">Day {ctx.cycle_day} of your cycle.</p>
-      ) : starts.length === 0 ? (
-        <Gate>
-          No period starts logged yet. One tap a month on Today is all this needs.
-        </Gate>
+      {earned && a ? (
+        <>
+          <div className="flex items-baseline gap-3">
+            <Stat
+              value={`${a.odds_ratio!.toFixed(1)}×`}
+              label="headache odds around a period"
+              tone={a.verdict === "possible association" ? "text-rose-300" : "text-zinc-100"}
+            />
+          </div>
+          <div className="mt-3 flex flex-col gap-1.5 text-xs">
+            {[
+              { label: "Days −2 to +3", rate: a.headache_rate_in_window ?? 0, tone: "bg-rose-400/80" },
+              { label: "Rest of cycle", rate: a.headache_rate_outside ?? 0, tone: "bg-zinc-500" },
+            ].map((r) => (
+              <div key={r.label} className="flex items-center gap-2">
+                <span className="w-24 shrink-0 text-zinc-400">{r.label}</span>
+                <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-zinc-800">
+                  <span className={`block h-full rounded-full ${r.tone}`} style={{ width: pct(r.rate) }} />
+                </span>
+                <span className="w-9 shrink-0 text-right tabular-nums text-zinc-300">{pct(r.rate)}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-zinc-400">
+            Share of days that were headache days. 95% range {a.ci_low?.toFixed(1)} to{" "}
+            {a.ci_high?.toFixed(1)}×,{" "}
+            {a.verdict === "possible association" ? "a possible association, not a cause" : a.verdict}.
+          </p>
+        </>
       ) : (
-        <Gate>Cycle day unknown: the last start is too long ago to count from.</Gate>
+        <Gate>
+          {starts.length === 0
+            ? "No period starts logged yet. One tap a month on Today is all this needs."
+            : `${starts.length} period start${starts.length === 1 ? "" : "s"} logged. The perimenstrual answer takes about six months of tapping to earn.`}
+        </Gate>
       )}
-      <div className="mt-2">
-        {insight ? (
-          <Gate>{insight.body}</Gate>
-        ) : (
-          <Gate>
-            {starts.length} period start{starts.length === 1 ? "" : "s"} logged. The
-            perimenstrual answer takes about six months of tapping to earn.
-          </Gate>
-        )}
-      </div>
+      {ctx.cycle_day !== null && (
+        <p className="mt-2 text-xs text-zinc-500">Today is day {ctx.cycle_day} of the current cycle.</p>
+      )}
     </Section>
   );
 }
 
 /** Everything still gated, in one collapsed place, so four "insufficient data" cards
- *  stop shouting from the middle of the screen. */
-const SURFACED = new Set(["Is it getting worse?", "Migraine or headache?", "Menstrual cycle"]);
+ *  stop shouting from the middle of the screen. Sections shown above are left out. */
+const SURFACED = new Set([
+  "Is it getting worse?",
+  "Migraine or headache?",
+  "Menstrual cycle",
+  "Weather and your headaches",
+]);
 
 function StillLearning({ s }: { s: Summary }) {
   const [open, setOpen] = useState(false);
   const items = s.insights.filter((i) => i.kind === "gated" && !SURFACED.has(i.title));
   if (items.length === 0) return null;
+  const names = items.map((i) => i.title.replace(/"/g, "").toLowerCase());
   return (
     <section>
       <button
@@ -377,7 +548,7 @@ function StillLearning({ s }: { s: Summary }) {
         className="flex min-h-11 w-full items-center justify-between"
       >
         <h3 className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-          Still being learned
+          More results
         </h3>
         <span className="text-lg text-zinc-400">{open ? "–" : "+"}</span>
       </button>
@@ -392,8 +563,7 @@ function StillLearning({ s }: { s: Summary }) {
         </ul>
       ) : (
         <Gate>
-          Weather, sleep and premonitions each need more data before Aura will call
-          anything. Tap to see where they stand.
+          {names.join(", ").replace(/^./, (c) => c.toUpperCase())}. Tap to see where each stands.
         </Gate>
       )}
     </section>
@@ -468,20 +638,29 @@ export default function Insights({ onUnauthorized }: { onUnauthorized: () => voi
   const [cycle, setCycle] = useState<CycleEvent[]>([]);
   const [patterns, setPatterns] = useState<PatternsData | null>(null);
   const [meds, setMeds] = useState<MedResponse | null>(null);
+  const [triggers, setTriggers] = useState<TriggerAnalysis | null>(null);
+  const [cycleAnalysis, setCycleAnalysis] = useState<MenstrualAnalysis | null>(null);
+  const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [s, c, p, m] = await Promise.all([
+      const [s, c, p, m, t, ca, eps] = await Promise.all([
         apiSummary(),
         apiCycleList(),
         apiPatterns(),
         apiMedResponse(),
+        apiTriggers(),
+        apiCycleAnalysis(),
+        apiList(500),
       ]);
       setSummary(s);
       setCycle(c);
       setPatterns(p);
       setMeds(m);
+      setTriggers(t);
+      setCycleAnalysis(ca);
+      setEpisodes(eps);
       setError(null);
     } catch (e) {
       if (e instanceof UnauthorizedError) return onUnauthorized();
@@ -509,9 +688,11 @@ export default function Insights({ onUnauthorized }: { onUnauthorized: () => voi
       <Headline s={summary} />
       <HowOften s={summary} />
       <MigraineOrHeadache s={summary} />
+      <WhereItHurts episodes={episodes} />
       {patterns && <WhenTheyHappen p={patterns} />}
+      {triggers && <Weather t={triggers} />}
       <Medication s={summary} m={meds} />
-      <Cycle events={cycle} s={summary} />
+      <Cycle events={cycle} a={cycleAnalysis} />
       <StillLearning s={summary} />
       <Exports onUnauthorized={onUnauthorized} />
     </div>

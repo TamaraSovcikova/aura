@@ -13,6 +13,8 @@ import type {
 import type { Summary } from "../worker/insights";
 import type { DayOfWeekAnalysis, TimeOfDayAnalysis } from "../worker/patterns";
 import type { MedResponse } from "../worker/meds";
+import type { TriggerAnalysis } from "../worker/triggers";
+import type { MenstrualAnalysis } from "../worker/cycle";
 
 export interface Patterns {
   day_of_week: DayOfWeekAnalysis;
@@ -136,6 +138,16 @@ export async function apiSummary(): Promise<Summary> {
 export async function apiPatterns(): Promise<Patterns> {
   const r = await fetch("/api/patterns", { headers: authHeaders() });
   return parse<Patterns>(r, "patterns");
+}
+
+export async function apiTriggers(): Promise<TriggerAnalysis> {
+  const r = await fetch("/api/triggers", { headers: authHeaders() });
+  return parse<TriggerAnalysis>(r, "triggers");
+}
+
+export async function apiCycleAnalysis(): Promise<MenstrualAnalysis> {
+  const r = await fetch("/api/cycle/analysis", { headers: authHeaders() });
+  return parse<MenstrualAnalysis>(r, "cycle analysis");
 }
 
 // --- Medication doses ------------------------------------------------------
