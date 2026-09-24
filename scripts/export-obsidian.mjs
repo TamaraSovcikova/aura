@@ -7,7 +7,7 @@
 //
 //   node scripts/export-obsidian.mjs                 # print to stdout (dry run)
 //   node scripts/export-obsidian.mjs --out PATH      # write the file
-//   AURA_PIN=... node scripts/export-obsidian.mjs --out "~/notes/Aura-snapshot.md" --write
+//   AURA_URL=https://... AURA_PIN=... node scripts/export-obsidian.mjs --out "~/notes/Aura-snapshot.md" --write
 //
 // Health data never enters the repo: --out points into the vault, and the default
 // dry run writes nothing.
@@ -15,7 +15,7 @@
 import { writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 
-const DEFAULT_URL = "https://aura.example.workers.dev";
+const DEFAULT_URL = process.env.AURA_URL ?? "http://localhost:8787";
 
 function parseArgs(argv) {
   const a = { url: DEFAULT_URL, pin: process.env.AURA_PIN, out: null, write: false };

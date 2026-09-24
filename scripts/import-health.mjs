@@ -7,10 +7,10 @@
 // a watch app, a spreadsheet you typed by hand).
 //
 //   node scripts/import-health.mjs --csv sleep.csv                 # dry run
-//   node scripts/import-health.mjs --csv sleep.csv --apply         # push to prod
+//   AURA_URL=https://... node scripts/import-health.mjs --csv sleep.csv --apply   # push
 //
 // Expected columns (any subset, extra columns ignored):
-//   date | local_date   YYYY-MM-DD, the day she WOKE
+//   date | local_date   YYYY-MM-DD, the day the sleeper WOKE
 //   sleep_minutes  (or sleep_hours)
 //   sleep_efficiency (0..1, or 0..100 with --efficiency-percent)
 //   steps
@@ -22,7 +22,7 @@
 import { readFileSync } from "node:fs";
 
 const UA = "aura-health-import/1.0";
-const DEFAULT_URL = "https://aura.example.workers.dev";
+const DEFAULT_URL = process.env.AURA_URL ?? "http://localhost:8787";
 
 function parseArgs(argv) {
   const a = { csv: null, apply: false, url: DEFAULT_URL, pin: process.env.AURA_PIN, effPct: false, source: "csv-import" };
@@ -122,7 +122,7 @@ if (days.length) {
 }
 
 console.log(
-  `\nReminder: sleep_minutes must be keyed on the day she WOKE, not the day she fell asleep.`
+  `\nReminder: sleep_minutes must be keyed on the day the sleeper WOKE, not the day they fell asleep.`
 );
 
 if (!args.apply) {
