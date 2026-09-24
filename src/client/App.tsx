@@ -42,6 +42,7 @@ import { parseRegions } from "../shared/headmap";
 import Insights, { todayLocal } from "./Insights";
 import SeverityInput from "./SeverityInput";
 import AttackSheet, { type AttackDraft, type DoseView } from "./AttackSheet";
+import AttackDetail from "./AttackDetail";
 import {
   loadPremOutbox,
   newPremonition,
@@ -122,6 +123,9 @@ export default function App() {
   const [endPanel, setEndPanel] = useState<LocalEpisode | null>(null);
   const [editDoses, setEditDoses] = useState<MedDose[]>([]);
   const [editing, setEditing] = useState<Episode | null>(null);
+  // Tapping a log entry opens it read-only first; Edit hands it to the sheet.
+  const [viewing, setViewing] = useState<Episode | null>(null);
+  const [viewDoses, setViewDoses] = useState<MedDose[]>([]);
   const [premLoggedAt, setPremLoggedAt] = useState<string | null>(null);
   const [cycleEvents, setCycleEvents] = useState<CycleEvent[]>([]);
   const [pending, setPending] = useState(0);
@@ -619,6 +623,25 @@ export default function App() {
     else setEditDoses([]);
   }, [editing, loadEditDoses]);
 
+  useEffect(() => {
+    if (!viewing) {
+      setViewDoses([]);
+      return;
+    }
+    let live = true;
+    apiListDoses(viewing.id)
+      .then((d) => live && setViewDoses(d))
+      .catch((e) => {
+        if (e instanceof UnauthorizedError) {
+          setError("That PIN was rejected. Enter it again.");
+          setPinReady(false);
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [viewing]);
+
   const editDoseOp = useCallback(
     async (fn: () => Promise<unknown>) => {
       if (!editing) return;
@@ -730,7 +753,18 @@ export default function App() {
   if (tab === "history") {
     return shell(
       <>
-        <History episodes={recent} onSelect={setEditing} />
+        <History episodes={recent} onSelect={setViewing} />
+        {viewing && (
+          <AttackDetail
+            episode={viewing}
+            doses={viewDoses}
+            onClose={() => setViewing(null)}
+            onEdit={() => {
+              setEditing(viewing);
+              setViewing(null);
+            }}
+          />
+        )}
         {editSheet}
       </>
     );

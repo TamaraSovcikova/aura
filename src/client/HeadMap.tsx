@@ -96,9 +96,15 @@ function HeadFigure({
           {zones.map((z) => {
             const on = selected.has(z.id);
             const heat = intensity?.[z.id] ?? 0;
+            // A zone nobody painted stays neutral; painted ones deepen with frequency.
             const style =
               intensity !== undefined
-                ? { fill: `rgba(244, 63, 94, ${(0.1 + heat * 0.8).toFixed(3)})` }
+                ? {
+                    fill:
+                      heat > 0
+                        ? `rgba(244, 63, 94, ${(0.25 + heat * 0.65).toFixed(3)})`
+                        : "rgba(63, 63, 70, 0.4)",
+                  }
                 : undefined;
             return (
               <path

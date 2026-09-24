@@ -25,7 +25,7 @@ const monthLabel = (key: string) =>
 /** What the recorded symptoms make this attack, in one word. Never a diagnosis:
  *  it is which ICHD-3 criteria the description meets, and only ever for attacks
  *  that carry a description at all. */
-function verdictLabel(e: Episode): { text: string; tone: string } | null {
+export function verdictLabel(e: Episode): { text: string; tone: string } | null {
   const imported = Boolean(e.source && e.source !== "app");
   // The imported diary has no symptoms, so it is never classified. Saying
   // "unclassified" for 200 rows would be noise, not information.
