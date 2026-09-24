@@ -8,8 +8,8 @@
 //
 // Aura counts. It does not diagnose. And it counts only from actual medication
 // entries, never from a self-reported trigger tag: reading the old "Medication"
-// tag as a frequency signal was a real mistake, and the tag actually marked when
-// an attack was treated.
+// tag as a frequency signal was a real mistake: the tag marked that an attack was
+// treated, not how often medication was taken.
 
 export type MedClass = "triptan" | "simple_analgesic" | "other" | "none";
 

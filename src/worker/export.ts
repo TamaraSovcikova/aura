@@ -183,8 +183,8 @@ ${s.insights.map((i) => `<li><strong>${html(i.title)}.</strong> ${html(i.body)}<
 
 // F16: the Obsidian export-back.
 //
-// A single markdown snapshot she can drop into her vault so the Dataview dashboards
-// she likes keep working. The rollup lives in YAML frontmatter (Dataview reads it at
+// A single markdown snapshot that drops into an Obsidian vault so existing Dataview
+// dashboards keep working. The rollup lives in YAML frontmatter (Dataview reads it at
 // the page level); the detail is human-readable tables. It is a READ-ONLY snapshot:
 // the app is the source of truth, so the header says to edit there, not here.
 //

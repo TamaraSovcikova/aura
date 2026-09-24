@@ -1,6 +1,6 @@
 -- 0003: premonition events ("I feel one coming").
 --
--- Deliberately NOT linked to an episode. the user sometimes gets the feeling and no
+-- Deliberately NOT linked to an episode. Sometimes the feeling comes and no
 -- headache follows, and those misses are the most valuable rows in the database:
 -- comparing "felt it, got one" against "felt it, got nothing" controls for whatever
 -- produces the feeling, which attack-days-vs-normal-days cannot do.

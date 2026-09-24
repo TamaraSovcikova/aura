@@ -39,11 +39,11 @@ const json = (v: unknown) => ({
 // ── Tools ────────────────────────────────────────────────────────────────────
 
 const DATA_CAVEATS = [
-  "Episodes before 2026-07-04 were imported from an Obsidian diary: they have no end time (so no duration), and some have no reliable start time (anchored at local noon).",
+  "Episodes with source 'obsidian-import' came from an older diary: they have no end time (so no duration), and those with started_at_time_known = 0 have no reliable start time (anchored at local noon).",
   "These are Monthly HEADACHE Days (MHD), not Monthly MIGRAINE Days (MMD). ICHD-3 criteria cannot be checked retroactively, so no imported attack is classified as migraine.",
-  "Weather does NOT live on the episode: the per-episode pressure columns are mostly NULL because geolocation was rarely granted. Day-level weather lives in the `days` table, keyed on local_date and the location timeline, and covers every day whether or not she had a headache.",
+  "Weather does NOT live on the episode: the per-episode pressure columns are mostly NULL because geolocation was rarely granted. Day-level weather lives in the `days` table, keyed on local_date and the location timeline, and covers every day whether or not it was a headache day.",
   "Do NOT compare headache days against control days by hand: an unadjusted, unweighted, untested difference is exactly how a false trigger gets believed. Use the `trigger_analysis` tool, which stratifies by place and month and corrects for multiple comparisons, and report its `verdict` field.",
-  "Sleep, steps and heart-rate data must be pushed from an Android reader (Health Connect has no cloud API). Until `control_days.days_with_sleep` is large, sleep reports 'insufficient data' and her belief that poor sleep triggers her migraines remains untestable, not disproven.",
+  "Sleep, steps and heart-rate data must be pushed from an Android reader (Health Connect has no cloud API). Until `control_days.days_with_sleep` is large, sleep reports 'insufficient data' and any belief that poor sleep triggers the migraines remains untestable, not disproven.",
   "Aura records and counts. It never diagnoses and never recommends treatment.",
 ].join(" ");
 
@@ -59,7 +59,7 @@ const TOOLS = [
     name: "monthly_headache_days",
     description:
       "Headache days per calendar month, with average peak severity. A day counts once no matter how many entries it has. This is the number a neurologist works in. " +
-      "The series is contiguous: a month with zero headache days is included as 0 rather than omitted. Each month carries `complete`; when false the month was only partly observed (she started logging mid-month, or the month is still running) and must NOT be compared against full months.",
+      "The series is contiguous: a month with zero headache days is included as 0 rather than omitted. Each month carries `complete`; when false the month was only partly observed (logging started mid-month, or the month is still running) and must NOT be compared against full months.",
     inputSchema: {
       type: "object",
       properties: {
@@ -71,7 +71,7 @@ const TOOLS = [
   {
     name: "headache_days_trend",
     description:
-      "Is it getting worse? Compares the mean headache days of the last 3 COMPLETE months against the previous 3 complete months. Partial months (the current one, and the first one she logged) are excluded and listed in `excluded_partial_months`, because averaging a part-month against full ones fabricates an improvement. " +
+      "Is it getting worse? Compares the mean headache days of the last 3 COMPLETE months against the previous 3 complete months. Partial months (the current one, and the first one logged) are excluded and listed in `excluded_partial_months`, because averaging a part-month against full ones fabricates an improvement. " +
       "Reports percent change and whether it meets the >=50% reduction clinicians treat as a treatment response. This is an observation about counts, NOT a claim that any treatment worked.",
     inputSchema: { type: "object", properties: {} },
   },
@@ -105,9 +105,9 @@ const TOOLS = [
   {
     name: "self_reported_triggers",
     description:
-      "Frequency of the trigger labels the user tagged herself in her old Obsidian diary (e.g. 'Not enough sleep', 'Stress', 'Medication'). " +
-      "CRITICAL: these are her BELIEFS, not evidence. They are self-reported, recorded only on attack days, and have no control group, so they cannot establish causation and must never be presented as established triggers. " +
-      "In particular the 'Medication' tag marks when an attack was treated; it does NOT indicate medication overuse. " +
+      "Frequency of the trigger labels the user tagged in the imported Obsidian diary (e.g. 'Not enough sleep', 'Stress', 'Medication'). " +
+      "CRITICAL: these are the user's BELIEFS, not evidence. They are self-reported, recorded only on attack days, and have no control group, so they cannot establish causation and must never be presented as established triggers. " +
+      "In particular the 'Medication' tag marks that an attack was treated; it does NOT indicate medication overuse. " +
       "Their only legitimate use is to compare belief against objective data once the weather backfill exists.",
     inputSchema: { type: "object", properties: {} },
   },
@@ -129,7 +129,7 @@ const TOOLS = [
   {
     name: "trigger_analysis",
     description:
-      "Case-control test of whether objective day-level factors (barometric pressure and its 24h change, sharpest 3h fall, temperature, humidity, daylight) differ between her headache days and her non-headache days. " +
+      "Case-control test of whether objective day-level factors (barometric pressure and its 24h change, sharpest 3h fall, temperature, humidity, daylight) differ between headache days and non-headache days. " +
       "Every comparison is stratified by (place, month) so season and country cannot masquerade as a trigger, and Benjamini-Hochberg q-values control the false discovery rate across the seven factors. " +
       "READ THE `verdict` FIELD, not the raw difference. A verdict of 'no evidence of association' is a real result and must be reported as such, never softened into 'a slight trend'. Nothing here establishes causation, and none of it is medical advice.",
     inputSchema: { type: "object", properties: {} },
@@ -137,14 +137,14 @@ const TOOLS = [
   {
     name: "belief_vs_data",
     description:
-      "Compares what the user believed triggered her migraines (her own tags: sleep, stress, late meal) against the objective data. " +
-      "CRITICAL: she recorded those tags ONLY on headache days, so there is no control group for them and this CANNOT show that stress causes her migraines. Always surface the `limitation` field. The only question this answers is narrower: do the days she blamed on X look meteorologically different from her other headache days?",
+      "Compares what the user believed triggered the migraines (their own tags: sleep, stress, late meal) against the objective data. " +
+      "CRITICAL: those tags were recorded ONLY on headache days, so there is no control group for them and this CANNOT show that stress causes migraines. Always surface the `limitation` field. The only question this answers is narrower: do the days blamed on X look meteorologically different from the other headache days?",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "premonition_conversion",
     description:
-      "Compares the days a premonition turned into a headache against the days it did not. Both groups share whatever produces the feeling, which makes this a cleaner contrast than headache days against normal days. Requires at least 10 of each; check `enough_data`. Her false alarms are the valuable half of this data.",
+      "Compares the days a premonition turned into a headache against the days it did not. Both groups share whatever produces the feeling, which makes this a cleaner contrast than headache days against normal days. Requires at least 10 of each; check `enough_data`. The false alarms are the valuable half of this data.",
     inputSchema: {
       type: "object",
       properties: { window_hours: { type: "number", description: "Default 24, max 72." } },
@@ -172,7 +172,7 @@ const TOOLS = [
   {
     name: "medication_response",
     description:
-      "How well does her acute medication work? Counts and medians over logged doses: the relief rate (doses that brought relief / all logged doses), the median minutes from dose to relief, and the median residual pain (0-10) it pulled down to, overall and per named medication (>=3 doses). " +
+      "How well does the acute medication work? Counts and medians over logged doses: the relief rate (doses that brought relief / all logged doses), the median minutes from dose to relief, and the median residual pain (0-10) it pulled down to, overall and per named medication (>=3 doses). " +
       "A dose with NO relief logged is kept and counted as one that did not help; time-to-relief is computed only from doses that reached relief, never zero-filled. Below 3 doses it returns 'insufficient data'. Read the `verdict` and `message`.",
     inputSchema: { type: "object", properties: {} },
   },
@@ -180,13 +180,13 @@ const TOOLS = [
     name: "menstrual_analysis",
     description:
       "Do headache odds differ in the perimenstrual window (day -2 to +3 around a period start)? A binary exposure, so it uses a Mantel-Haenszel odds ratio stratified by (place, month), not a difference in means. " +
-      "Days whose cycle day cannot be known are excluded, never assumed. There is NO cycle data in her history, so until she has logged period starts for several months this returns 'insufficient data'. Read the `verdict`.",
+      "Days whose cycle day cannot be known are excluded, never assumed. Imported history carries no cycle data, so until period starts have been logged for several months this returns 'insufficient data'. Read the `verdict`.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "log_period_start",
     description:
-      "Record that the user's period started on a given day (defaults to today). One tap a month; the cycle day of every other day is derived from these. Use only when she says it started; never infer it.",
+      "Record that the user's period started on a given day (defaults to today). One tap a month; the cycle day of every other day is derived from these. Use only when the user says it started; never infer it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -198,7 +198,7 @@ const TOOLS = [
   {
     name: "log_premonition",
     description:
-      "Record that the user feels a migraine coming, right now. Writes a timestamped premonition. Use only when she says she feels one coming; never infer it.",
+      "Record that the user feels a migraine coming, right now. Writes a timestamped premonition. Use only when the user says one is coming; never infer it.",
     inputSchema: {
       type: "object",
       properties: {

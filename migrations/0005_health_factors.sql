@@ -6,12 +6,12 @@
 -- Connect) pushes daily aggregates in, and the trigger engine picks them up
 -- automatically.
 --
--- Why this matters more than any dashboard: the user's two strongest beliefs, "not
--- enough sleep" and "stress", were only ever recorded on days
--- she had a headache. With no control group they are permanently untestable. The
--- weather, which she cannot feel, IS testable and shows nothing. Recording sleep on
--- EVERY day, the way the weather already is, is the only thing that turns her
--- strongest belief into a hypothesis that can be checked.
+-- Why this matters more than any dashboard: the most common self-reported
+-- triggers, "not enough sleep" and "stress", were only ever recorded on headache
+-- days. With no control group they are permanently untestable. The weather, which
+-- nobody can feel, IS testable. Recording sleep on EVERY day, the way the weather
+-- already is, is the only thing that turns the sleep belief into a hypothesis that
+-- can be checked.
 --
 -- These are attached to `days`, not to episodes, because a control day needs them
 -- just as much as a headache day does. That is the whole point.

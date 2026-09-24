@@ -39,7 +39,7 @@ describe("monthSeries", () => {
 
 describe("headacheDaysTrend", () => {
   it("never compares a part-month against full months", () => {
-    // A realistic shape: strong months, then a quiet June, then 3 days of July.
+    // A realistic shape: busy months, then a quiet June, then 3 days of July.
     // Including July fabricates a >=50% reduction, the clinical threshold for a
     // treatment response. That would be a confident, wrong answer.
     const rows = [

@@ -9,8 +9,8 @@
 -- events, so it can never go stale when a forgotten period is added later, and a
 -- correction to one date silently fixes every day that depended on it.
 --
--- Like premonitions, this cannot be backfilled: there is no cycle data anywhere in
--- her vault (one incidental mention across the notes). Every month not logged is
+-- Like premonitions, this cannot be backfilled: the imported diary carries no
+-- cycle data. Every month not logged is
 -- a month the hormonal hypothesis cannot be tested on.
 
 CREATE TABLE cycle_events (
