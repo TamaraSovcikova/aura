@@ -1,7 +1,5 @@
 # Phase 0: capture-only migraine PWA (one-tap logging + auto-enrichment)
 
-Tracking issue: https://github.com/TamaraSovcikova/aura/issues/1
-
 ## Context
 
 Aura replaces a failing Obsidian migraine-logging habit whose real problem is
@@ -9,24 +7,22 @@ capture friction: logging needs a computer, so entries are backfilled late and
 half-empty. Phase 0 proves the fix with the smallest thing that matters: one-tap
 start/stop capture on the phone, with context auto-attached so entries are complete
 without typing. No dashboards yet. Dashboards and doctor export come in Phase 1,
-built on the real data Phase 0 collects. Full design: vault doc
-`docs/DESIGN-capture-first-mvp.md`.
+built on the real data Phase 0 collects.
 
 ## Current state
 
-Greenfield. `the repo` (remote `TamaraSovcikova/aura`, private) contains only
+Greenfield. The repo contains only
 the skeleton: `README.md`, `CLAUDE.md`, `.gitignore`. No app code.
 
 ## Proposed change
 
-A one-screen installable PWA on the Checkbox stack (knowledge transfers), backed by a
+A one-screen installable PWA, backed by a
 Cloudflare Worker + D1. Capture is guaranteed; enrichment is best-effort.
 
 ### Stack (decisions locked)
 
 - **Front end (D1):** Vite + React 19 + TypeScript, Tailwind v4, `vite-plugin-pwa`.
-  Mirrors Checkbox's core, minus heavy deps (no dnd-kit, radix, tanstack-query,
-  router). One screen in Phase 0, grows into Phase 1 dashboards.
+  Deliberately light (no dnd-kit, radix, tanstack-query, router). One screen in Phase 0, grows into Phase 1 dashboards.
 - **Backend:** Hono on a Cloudflare Worker.
 - **Database:** Cloudflare D1 (SQLite), `wrangler d1 migrations`.
 - **Weather:** Open-Meteo (`https://api.open-meteo.com/v1/forecast`), free, no API key,
@@ -96,7 +92,7 @@ On any failure or missing geo, store nulls and return 200. Never 5xx a capture.
 
 ## Acceptance criteria
 
-1. PWA installs to an Android phone home screen (manifest valid, service worker registers).
+1. PWA installs to an Android home screen (manifest valid, service worker registers).
 2. One tap opens an episode with a server timestamp; a second tap closes it; stored
    duration equals end minus start.
 3. An open episode survives an app reload (UI reads `/current` and shows "ended" state).
@@ -120,7 +116,7 @@ On any failure or missing geo, store nulls and return 200. Never 5xx a capture.
 ## Rollback plan
 
 Pre-production; nothing to roll back to. Revert the feature branch / PR. D1 is
-disposable in Phase 0 (no real users but the user). Migrations are additive; a bad
+disposable in Phase 0 (a single user). Migrations are additive; a bad
 migration is dropped by recreating the local/remote D1.
 
 ## Effort estimate
@@ -151,7 +147,3 @@ screen, timer, quick-panel, voice) + 2h offline outbox + 2h tests + deploy.
 - Native widget / Quick Settings tile (true one-tap).
 - Multi-user / accounts (schema seam `user_id` only).
 
-## Related
-
-- Design: `docs/DESIGN-capture-first-mvp.md`
-- Stack reference: the Checkbox repo (`the Checkbox repo`).

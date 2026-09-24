@@ -2,17 +2,16 @@
 
 ## Why this matters more than any dashboard
 
-the user's two strongest beliefs about her migraines are **"not enough sleep"** and **"stress"**. Both were recorded *only on days she had a
-headache*. With no control group they are permanently untestable, no matter how
+The two most common self-reported migraine triggers are **"not enough sleep"** and
+**"stress"**. In the imported diary both were recorded *only on headache days*. With no control group they are permanently untestable, no matter how
 much history accumulates.
 
-Meanwhile the weather, which she cannot feel and never logged, **is** testable,
-because `days` holds it for every calendar day. The trigger engine checked seven
-weather factors across N headache days and M control days and found **no
-evidence of any association**.
+Meanwhile the weather, which nobody can feel and nobody logged, **is** testable,
+because `days` holds it for every calendar day. The trigger engine tests seven
+weather factors against headache and non-headache days.
 
 Recording sleep on *every* day, the way the weather already is, is the only thing
-that turns her strongest belief into a hypothesis that can actually be checked.
+that turns the sleep belief into a hypothesis that can actually be checked.
 
 ## The constraint (verified, 2026-07)
 
@@ -20,7 +19,7 @@ that turns her strongest belief into a hypothesis that can actually be checked.
   is no way to query it from a server. An Android app must read it and upload.
 - **Reads are foreground-only** by default. Background reads need a separate,
   explicitly declared permission.
-- **A Android phone alone does not produce sleep data.** Bedtime mode is a schedule,
+- **A phone alone does not produce sleep data.** Bedtime mode is a schedule,
   not sleep sensing. Something must *write* sleep sessions into Health Connect.
 
 So F14 splits in two: the server intake (built, tested, and shipped) and the
@@ -43,16 +42,16 @@ by existing. There is a test for exactly that.
 
 ## The one rule that would silently corrupt everything
 
-**Sleep belongs to the day she WOKE, not the day she fell asleep.**
+**Sleep belongs to the day the sleeper WOKE, not the day they fell asleep.**
 
 The exposure for a headache on day D is the night that *ended* on the morning of D.
-Keying it to the day she fell asleep would shift every value one day out of phase
+Keying it to the day of falling asleep would shift every value one day out of phase
 with the outcome: not an obvious break, just a confident wrong answer.
 
 `POST /api/days/health` with `sleep_sessions` does this for you (it needs `tz`).
 If you push pre-aggregated `days`, you must have done it yourself.
 
-## Step 0 (the user's decision): pick a sleep source
+## Step 0: pick a sleep source
 
 Nothing downstream works until something writes sleep sessions into Health Connect:
 
@@ -68,7 +67,7 @@ Export from whatever app records sleep, then:
 
 ```bash
 node scripts/import-health.mjs --csv sleep.csv                 # dry run, sends nothing
-node scripts/import-health.mjs --csv sleep.csv --apply --pin $AURA_PIN
+node scripts/import-health.mjs --csv sleep.csv --apply --pin $AURA_PIN   # with AURA_URL set
 ```
 
 Accepted columns (any subset): `date`/`local_date`, `sleep_minutes` or
@@ -98,7 +97,7 @@ val body = buildJsonObject {
         }
     }
 }
-// POST to https://aura.example.workers.dev/api/days/health
+// POST to https://<your-worker>.workers.dev/api/days/health
 // header: Authorization: Bearer <ACCESS_PIN>
 ```
 
