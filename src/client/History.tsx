@@ -104,6 +104,113 @@ function Row({ e, onSelect }: { e: Episode; onSelect: (e: Episode) => void }) {
   );
 }
 
+const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
+
+/** The calendar day an attack belongs to: its local date, falling back to UTC. */
+const dayOf = (e: Episode) => e.local_date ?? e.started_at.slice(0, 10);
+
+/** Cell fill for a day's worst severity. Unknown severity still marks the day. */
+function dayFill(sev: number | null): React.CSSProperties {
+  if (sev === null) return { background: "rgba(244, 63, 94, 0.28)" };
+  const a = 0.18 + (Math.min(sev, SEVERITY_MAX) / SEVERITY_MAX) * 0.72;
+  return { background: `rgba(244, 63, 94, ${a.toFixed(2)})` };
+}
+
+/**
+ * One month as a grid, Monday first. A day with an attack is shaded by the worst
+ * severity logged that day; a dot marks a day medication was taken. Tapping a
+ * shaded day opens its (first) attack, the same as tapping its row.
+ */
+function MonthGrid({
+  monthKey: key,
+  rows,
+  onSelect,
+}: {
+  monthKey: string;
+  rows: Episode[];
+  onSelect: (e: Episode) => void;
+}) {
+  const byDay = new Map<string, Episode[]>();
+  for (const e of rows) {
+    const d = dayOf(e);
+    byDay.set(d, [...(byDay.get(d) ?? []), e]);
+  }
+  const first = new Date(`${key}-01T00:00:00Z`);
+  const lead = (first.getUTCDay() + 6) % 7; // Monday = 0
+  const daysIn = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+
+  const cells: Array<{ date: string; day: number } | null> = [
+    ...Array.from({ length: lead }, () => null),
+    ...Array.from({ length: daysIn }, (_, i) => ({
+      date: `${key}-${String(i + 1).padStart(2, "0")}`,
+      day: i + 1,
+    })),
+  ];
+
+  return (
+    <div className="px-3 pb-2 pt-3">
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-zinc-500">
+        {WEEKDAYS.map((w, i) => (
+          <span key={i}>{w}</span>
+        ))}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {cells.map((c, i) => {
+          if (!c) return <span key={`pad-${i}`} />;
+          const hits = byDay.get(c.date);
+          if (!hits) {
+            return (
+              <span
+                key={c.date}
+                className="flex aspect-square items-center justify-center rounded-md bg-zinc-800/40 text-[11px] tabular-nums text-zinc-500"
+              >
+                {c.day}
+              </span>
+            );
+          }
+          const sevs = hits.map((h) => h.severity).filter((s): s is number => s !== null);
+          const worst = sevs.length ? Math.max(...sevs) : null;
+          const medicated = hits.some((h) => (h.dose_count ?? 0) > 0 || Boolean(h.meds?.trim()));
+          return (
+            <button
+              key={c.date}
+              onClick={() => onSelect(hits[0])}
+              aria-label={`${dayShort(hits[0].started_at)}: ${hits.length === 1 ? "1 attack" : `${hits.length} attacks`}${worst !== null ? `, worst ${worst}/${SEVERITY_MAX}` : ""}${medicated ? ", medication taken" : ""}`}
+              style={dayFill(worst)}
+              className="relative flex aspect-square items-center justify-center rounded-md text-[11px] font-medium tabular-nums text-white transition active:scale-95"
+            >
+              {c.day}
+              {medicated && (
+                <span aria-hidden className="absolute bottom-1 h-1 w-1 rounded-full bg-white/85" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Legend() {
+  return (
+    <div className="flex items-center justify-between text-[11px] text-zinc-400">
+      <span className="flex items-center gap-2">
+        mild
+        <span
+          aria-hidden
+          className="h-2 w-20 rounded-full"
+          style={{ background: "linear-gradient(90deg, rgba(244,63,94,0.25), rgba(244,63,94,0.9))" }}
+        />
+        severe
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-zinc-300" />
+        medication
+      </span>
+    </div>
+  );
+}
+
 export default function History({
   episodes,
   onSelect,
@@ -130,19 +237,28 @@ export default function History({
 
   return (
     <section className="flex flex-col gap-6">
-      {groups.map((g) => (
-        <div key={g.key}>
-          <h2 className="mb-2 flex items-baseline justify-between text-xs font-medium uppercase tracking-wide text-zinc-400">
-            <span>{monthLabel(g.key)}</span>
-            <span className="tabular-nums text-zinc-500">{g.rows.length}</span>
-          </h2>
-          <ul className="divide-y divide-zinc-800 rounded-xl bg-zinc-900/60">
-            {g.rows.map((e) => (
-              <Row key={e.id} e={e} onSelect={onSelect} />
-            ))}
-          </ul>
-        </div>
-      ))}
+      <Legend />
+      {groups.map((g) => {
+        const headacheDays = new Set(g.rows.map(dayOf)).size;
+        return (
+          <div key={g.key}>
+            <h2 className="mb-2 flex items-baseline justify-between text-xs font-medium uppercase tracking-wide text-zinc-400">
+              <span>{monthLabel(g.key)}</span>
+              <span className="normal-case tracking-normal tabular-nums text-zinc-500">
+                {headacheDays} headache {headacheDays === 1 ? "day" : "days"}
+              </span>
+            </h2>
+            <div className="overflow-hidden rounded-xl bg-zinc-900/60">
+              <MonthGrid monthKey={g.key} rows={g.rows} onSelect={onSelect} />
+              <ul className="divide-y divide-zinc-800 border-t border-zinc-800">
+                {g.rows.map((e) => (
+                  <Row key={e.id} e={e} onSelect={onSelect} />
+                ))}
+              </ul>
+            </div>
+          </div>
+        );
+      })}
       <p className="text-center text-xs text-zinc-400">
         Tap an entry to edit or delete it.
       </p>

@@ -33,10 +33,14 @@ const base: Episode = {
 
 const ep = (over: Partial<Episode>): Episode => ({ ...base, ...over });
 
+// The list rows, not the calendar cells above them.
+const rowButtons = () =>
+  screen.getAllByRole("listitem").map((li) => within(li).getByRole("button"));
+
 describe("History rows", () => {
   it("shows both times and the duration, not just the start", () => {
     render(<History episodes={[ep({})]} onSelect={() => {}} />);
-    const row = screen.getByRole("button");
+    const row = rowButtons()[0];
     expect(row.textContent).toMatch(/→/);
     expect(row.textContent).toMatch(/6h 2m/);
   });
@@ -60,7 +64,7 @@ describe("History rows", () => {
         onSelect={() => {}}
       />
     );
-    expect(screen.getByRole("button").textContent).toMatch(/migraine/);
+    expect(rowButtons()[0].textContent).toMatch(/migraine/);
   });
 
   it("never labels an imported row, which carries no symptoms to judge", () => {
@@ -70,7 +74,7 @@ describe("History rows", () => {
         onSelect={() => {}}
       />
     );
-    const row = screen.getByRole("button");
+    const row = rowButtons()[0];
     expect(row.textContent).toMatch(/imported/);
     expect(row.textContent).not.toMatch(/migraine|tension/);
     // No end time recorded is "unknown", not "ongoing".
@@ -87,7 +91,7 @@ describe("History rows", () => {
         onSelect={() => {}}
       />
     );
-    const rows = screen.getAllByRole("button");
+    const rows = rowButtons();
     expect(rows[0].textContent).toMatch(/2 doses, helped/);
     expect(rows[1].textContent).toMatch(/1 dose/);
     expect(rows[1].textContent).not.toMatch(/helped/);
@@ -97,7 +101,7 @@ describe("History rows", () => {
     render(
       <History episodes={[ep({ id: 6, meds: "sumatriptan 50mg" })]} onSelect={() => {}} />
     );
-    expect(screen.getByRole("button").textContent).toMatch(/medication/);
+    expect(rowButtons()[0].textContent).toMatch(/medication/);
   });
 
   it("marks an estimated onset on the time, and groups by month", () => {
@@ -112,14 +116,29 @@ describe("History rows", () => {
     );
     expect(screen.getByText(/July 2026/)).toBeInTheDocument();
     expect(screen.getByText(/June 2026/)).toBeInTheDocument();
-    expect(screen.getAllByRole("button")[0].textContent).toMatch(/~/);
+    expect(rowButtons()[0].textContent).toMatch(/~/);
   });
 
   it("opens an entry when tapped", () => {
     const onSelect = vi.fn();
     render(<History episodes={[ep({})]} onSelect={onSelect} />);
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(rowButtons()[0]);
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+  });
+
+  it("shades a calendar day by its worst severity and opens it when tapped", () => {
+    const onSelect = vi.fn();
+    render(
+      <History
+        episodes={[ep({ id: 9, severity: 3 }), ep({ id: 10, severity: 8, dose_count: 1 })]}
+        onSelect={onSelect}
+      />
+    );
+    const cell = screen.getByRole("button", { name: /attacks, worst 8\/10, medication taken/ });
+    expect(cell.textContent).toBe("15");
+    fireEvent.click(cell);
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 9 }));
+    expect(screen.getByText("1 headache day")).toBeInTheDocument();
   });
 
   it("says so plainly when there is nothing logged", () => {
