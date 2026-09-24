@@ -40,8 +40,7 @@ describe("HeadMap", () => {
 
   it("treats a midline-only selection as central, not one-sided", () => {
     render(<HeadMapHarness />);
-    // Switch to the back view where the midline regions (crown, neck) live.
-    fireEvent.click(screen.getByRole("button", { name: "back" }));
+    // Both views are drawn at once; the midline regions (crown, neck) are on the back.
     fireEvent.click(screen.getByRole("button", { name: "Top of head" }));
     expect(screen.getByText("Both sides / central")).toBeInTheDocument();
   });
@@ -54,31 +53,34 @@ function SymptomHarness() {
   return <SymptomDetails value={a} onChange={setA} />;
 }
 
-const rowButton = (label: string, name: string) =>
-  within(screen.getByText(label).parentElement as HTMLElement).getByRole("button", { name });
+const nauseaChip = () => screen.getByRole("button", { name: /^Nausea:/ });
 
 describe("SymptomDetails tri-state", () => {
   it("keeps 'not recorded' (null) distinct from 'no' (false)", () => {
     latestAttrs = emptyAttrs();
     render(<SymptomHarness />);
-    // Default: nothing recorded.
+    // Default: nothing recorded, and the chip says so.
     expect(latestAttrs.nausea).toBeNull();
+    expect(nauseaChip()).toHaveAccessibleName("Nausea: not recorded");
 
-    fireEvent.click(rowButton("Nausea", "Yes"));
+    fireEvent.click(nauseaChip());
     expect(latestAttrs.nausea).toBe(true);
+    expect(nauseaChip()).toHaveAccessibleName("Nausea: yes");
 
-    fireEvent.click(rowButton("Nausea", "No"));
+    fireEvent.click(nauseaChip());
     expect(latestAttrs.nausea).toBe(false); // an explicit no, which the classifier uses
+    expect(nauseaChip()).toHaveTextContent("No nausea");
 
-    // Tapping the active choice again clears it back to unrecorded.
-    fireEvent.click(rowButton("Nausea", "No"));
+    // A third tap clears it back to unrecorded.
+    fireEvent.click(nauseaChip());
     expect(latestAttrs.nausea).toBeNull();
   });
 
   it("records pain quality and the head map into the same attrs object", () => {
     latestAttrs = emptyAttrs();
     render(<SymptomHarness />);
-    fireEvent.click(rowButton("Pain quality", "Throbbing"));
+    const quality = screen.getByRole("group", { name: "Pain quality" });
+    fireEvent.click(within(quality).getByRole("button", { name: "Throbbing" }));
     fireEvent.click(screen.getByRole("button", { name: "Left temple" }));
     expect(latestAttrs.quality).toBe("throbbing");
     expect(latestAttrs.pain_regions).toEqual(["l-temple"]);

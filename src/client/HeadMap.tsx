@@ -6,39 +6,139 @@
 //
 // Geometry lives here; the region ids and their meaning live in shared/headmap so
 // the map and the derivation cannot drift apart.
+//
+// Both views are drawn at once, side by side. The regions are zones that tile the
+// head silhouette (clipped to it), so a painted area reads as pain on a head rather
+// than a button floating over one. The same geometry renders read-only as a heat
+// map in Insights, where `intensity` shades each zone by how often it was painted.
 
-import { useState } from "react";
+import { useId } from "react";
 import { HEAD_REGIONS, deriveSide, type HeadView } from "../shared/headmap";
 
-interface Shape {
+interface Zone {
   id: string;
-  // An ellipse hit-area. cx/cy/rx/ry in the 200x240 viewBox.
-  cx: number;
-  cy: number;
-  rx: number;
-  ry: number;
+  /** Path in the 200x240 viewBox, clipped to the silhouette. Neighbours share edges. */
+  d: string;
 }
 
-// Front view is drawn as a mirror (her left is on the left of the image).
-const FRONT: Shape[] = [
-  { id: "l-forehead", cx: 74, cy: 74, rx: 22, ry: 16 },
-  { id: "r-forehead", cx: 126, cy: 74, rx: 22, ry: 16 },
-  { id: "l-temple", cx: 42, cy: 104, rx: 17, ry: 22 },
-  { id: "r-temple", cx: 158, cy: 104, rx: 17, ry: 22 },
-  { id: "l-eye", cx: 78, cy: 116, rx: 18, ry: 13 },
-  { id: "r-eye", cx: 122, cy: 116, rx: 18, ry: 13 },
-  { id: "l-cheek", cx: 80, cy: 162, rx: 20, ry: 20 },
-  { id: "r-cheek", cx: 120, cy: 162, rx: 20, ry: 20 },
+// The front view is a mirror: the person's left is on the left of the image, as if
+// looking in a mirror, because that is how people point at their own face. The
+// dividing lines follow the brow and the temples rather than a grid.
+const FRONT_ZONES: Zone[] = [
+  { id: "l-forehead", d: "M20 0 H100 V92 Q82 84 64 92 Q60 84 62 76 H20 Z" },
+  { id: "r-forehead", d: "M180 0 H100 V92 Q118 84 136 92 Q140 84 138 76 H180 Z" },
+  { id: "l-temple", d: "M20 76 H62 Q60 84 64 92 Q56 114 64 138 H20 Z" },
+  { id: "r-temple", d: "M180 76 H138 Q140 84 136 92 Q144 114 136 138 H180 Z" },
+  { id: "l-eye", d: "M64 92 Q82 84 100 92 V136 Q82 142 64 138 Q56 114 64 92 Z" },
+  { id: "r-eye", d: "M136 92 Q118 84 100 92 V136 Q118 142 136 138 Q144 114 136 92 Z" },
+  { id: "l-cheek", d: "M20 138 H64 Q82 142 100 136 V240 H20 Z" },
+  { id: "r-cheek", d: "M180 138 H136 Q118 142 100 136 V240 H180 Z" },
 ];
 
-const BACK: Shape[] = [
-  { id: "crown", cx: 100, cy: 62, rx: 46, ry: 26 },
-  { id: "l-occiput", cx: 74, cy: 120, rx: 26, ry: 30 },
-  { id: "r-occiput", cx: 126, cy: 120, rx: 26, ry: 30 },
-  { id: "neck", cx: 100, cy: 196, rx: 26, ry: 20 },
+// Back: the crown and neck boundaries are single curves, split at the midline so
+// the left and right halves share exactly the same edge.
+const BACK_ZONES: Zone[] = [
+  { id: "crown", d: "M20 0 H180 V80 Q100 96 20 80 Z" },
+  { id: "l-occiput", d: "M20 80 Q60 88 100 88 V176 Q60 176 20 168 Z" },
+  { id: "r-occiput", d: "M180 80 Q140 88 100 88 V176 Q140 176 180 168 Z" },
+  { id: "neck", d: "M20 168 Q60 176 100 176 Q140 176 180 168 V240 H20 Z" },
 ];
+
+const SILHOUETTE: Record<HeadView, string> = {
+  front:
+    "M100 20 C62 20 42 52 42 98 C42 142 54 182 78 200 C87 207 113 207 122 200 C146 182 158 142 158 98 C158 52 138 20 100 20 Z",
+  back: "M100 20 C60 20 40 58 40 110 C40 150 56 178 80 190 L80 232 L120 232 L120 190 C144 178 160 150 160 110 C160 58 140 20 100 20 Z",
+};
 
 const labelOf = (id: string) => HEAD_REGIONS.find((r) => r.id === id)?.label ?? id;
+
+function HeadFigure({
+  view,
+  selected,
+  intensity,
+  onToggle,
+}: {
+  view: HeadView;
+  selected: Set<string>;
+  intensity?: Record<string, number>;
+  onToggle?: (id: string) => void;
+}) {
+  // useId returns ":r1:"-style ids; colons break url(#...) references in some engines.
+  const clip = `head-${view}-${useId().replace(/:/g, "")}`;
+  const zones = view === "front" ? FRONT_ZONES : BACK_ZONES;
+  const interactive = !!onToggle;
+
+  return (
+    <figure className="flex flex-1 flex-col items-center">
+      <svg
+        viewBox="0 0 200 240"
+        className="h-52 w-full max-w-40"
+        role={interactive ? "group" : "img"}
+        aria-label={`Head map, ${view}`}
+      >
+        <defs>
+          <clipPath id={clip}>
+            <path d={SILHOUETTE[view]} />
+          </clipPath>
+        </defs>
+
+        {view === "front" && (
+          // Ears sit outside the clip so they frame the face without being zones.
+          <g className="fill-zinc-800 stroke-zinc-700" strokeWidth={1.5}>
+            <path d="M44 100 C32 98 30 124 44 130 Z" />
+            <path d="M156 100 C168 98 170 124 156 130 Z" />
+          </g>
+        )}
+
+        <path d={SILHOUETTE[view]} className="fill-zinc-800" />
+
+        <g clipPath={`url(#${clip})`}>
+          {zones.map((z) => {
+            const on = selected.has(z.id);
+            const heat = intensity?.[z.id] ?? 0;
+            const style =
+              intensity !== undefined
+                ? { fill: `rgba(244, 63, 94, ${(0.1 + heat * 0.8).toFixed(3)})` }
+                : undefined;
+            return (
+              <path
+                key={z.id}
+                d={z.d}
+                onClick={onToggle ? () => onToggle(z.id) : undefined}
+                role={interactive ? "button" : undefined}
+                aria-label={interactive ? labelOf(z.id) : undefined}
+                aria-pressed={interactive ? on : undefined}
+                style={style}
+                className={
+                  intensity !== undefined
+                    ? "stroke-zinc-900"
+                    : `cursor-pointer stroke-zinc-900 transition-colors ${
+                        on ? "fill-rose-500/80" : "fill-zinc-700/40 hover:fill-zinc-600/60"
+                      }`
+                }
+                strokeWidth={2}
+              />
+            );
+          })}
+        </g>
+
+        {/* Features drawn over the zones, never catching taps. */}
+        <g className="pointer-events-none fill-none stroke-zinc-500/70" strokeWidth={1.5} strokeLinecap="round">
+          {view === "front" ? (
+            <>
+              <path d="M70 114 Q82 106 94 114 Q82 120 70 114 Z" />
+              <path d="M106 114 Q118 106 130 114 Q118 120 106 114 Z" />
+              <path d="M100 122 L95 152 Q100 156 105 152" />
+              <path d="M88 174 Q100 180 112 174" />
+            </>
+          ) : null}
+        </g>
+        <path d={SILHOUETTE[view]} className="pointer-events-none fill-none stroke-zinc-600" strokeWidth={2} />
+      </svg>
+      <figcaption className="text-[11px] uppercase tracking-wide text-zinc-500">{view}</figcaption>
+    </figure>
+  );
+}
 
 export default function HeadMap({
   value,
@@ -47,8 +147,6 @@ export default function HeadMap({
   value: string[];
   onChange: (ids: string[]) => void;
 }) {
-  const [view, setView] = useState<HeadView>("front");
-  const shapes = view === "front" ? FRONT : BACK;
   const selected = new Set(value);
   const side = deriveSide(value);
 
@@ -60,66 +158,10 @@ export default function HeadMap({
 
   return (
     <div className="flex flex-col items-center">
-      <div className="mb-2 flex gap-1 rounded-lg bg-zinc-800 p-0.5 text-xs">
-        {(["front", "back"] as const).map((v) => (
-          <button
-            key={v}
-            onClick={() => setView(v)}
-            className={`flex min-h-11 items-center rounded-md px-5 capitalize transition ${
-              view === v ? "bg-zinc-700 text-zinc-100" : "text-zinc-400"
-            }`}
-          >
-            {v}
-          </button>
-        ))}
+      <div className="flex w-full gap-2">
+        <HeadFigure view="front" selected={selected} onToggle={toggle} />
+        <HeadFigure view="back" selected={selected} onToggle={toggle} />
       </div>
-
-      <svg viewBox="0 0 200 240" className="h-72 w-auto" role="group" aria-label="Head map">
-        {/* A solid head silhouette so the regions sit on a surface rather than
-            floating as wireframe rings. Front tapers to a jaw; back is a rounder
-            skull. */}
-        <path
-          d={
-            view === "front"
-              ? "M100 22 C64 22 42 52 42 98 C42 140 54 180 78 198 C86 205 114 205 122 198 C146 180 158 140 158 98 C158 52 136 22 100 22 Z"
-              : "M100 20 C60 20 38 58 38 112 C38 172 66 214 100 214 C134 214 162 172 162 112 C162 58 140 20 100 20 Z"
-          }
-          className="fill-zinc-800 stroke-zinc-700"
-          strokeWidth={2}
-        />
-        {view === "front" && (
-          // A faint nose, just enough to read as a face without looking like clipart.
-          <path
-            d="M100 108 L94 146 Q100 152 106 146 Z"
-            className="fill-none stroke-zinc-600"
-            strokeWidth={1.5}
-            strokeLinejoin="round"
-          />
-        )}
-        {shapes.map((s) => {
-          const on = selected.has(s.id);
-          return (
-            <ellipse
-              key={s.id}
-              cx={s.cx}
-              cy={s.cy}
-              rx={s.rx}
-              ry={s.ry}
-              onClick={() => toggle(s.id)}
-              role="button"
-              aria-label={labelOf(s.id)}
-              aria-pressed={on}
-              className={`cursor-pointer transition ${
-                on
-                  ? "fill-rose-500/80 stroke-rose-300"
-                  : "fill-zinc-700/50 stroke-zinc-600 hover:fill-zinc-600/70"
-              }`}
-              strokeWidth={1.25}
-            />
-          );
-        })}
-      </svg>
-
       <p className="mt-1 h-4 text-xs text-zinc-400">
         {value.length === 0
           ? "Tap where it hurts"
@@ -127,6 +169,24 @@ export default function HeadMap({
             ? "One-sided"
             : "Both sides / central"}
       </p>
+    </div>
+  );
+}
+
+/**
+ * Read-only heat map: every zone shaded by the share of attacks that painted it.
+ * `counts` maps region id to how many attacks included it.
+ */
+export function HeadHeatMap({ counts }: { counts: Record<string, number> }) {
+  const max = Math.max(1, ...Object.values(counts));
+  const intensity = Object.fromEntries(
+    HEAD_REGIONS.map((r) => [r.id, (counts[r.id] ?? 0) / max])
+  );
+  const none = new Set<string>();
+  return (
+    <div className="flex w-full gap-2">
+      <HeadFigure view="front" selected={none} intensity={intensity} />
+      <HeadFigure view="back" selected={none} intensity={intensity} />
     </div>
   );
 }

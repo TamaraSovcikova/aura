@@ -4,6 +4,10 @@
 // is preserved as null, because the classifier treats a missing answer as unknown,
 // never as a no. Nothing here is required; a skipped panel just leaves an attack
 // counted as a headache day, not a migraine day.
+//
+// The answers are chips rather than a Yes/No row each: six rows of paired buttons
+// filled a whole phone screen. A chip cycles unrecorded -> yes -> no -> unrecorded,
+// and says which state it is in words, so "no" never looks like "not asked".
 
 import HeadMap from "./HeadMap";
 
@@ -37,49 +41,76 @@ export const attrsEmpty = (a: Attrs): boolean =>
   a.phonophobia === null &&
   a.aura === null;
 
-function TriToggle<T extends string>({
+type BoolKey = "aggravated_by_activity" | "nausea" | "photophobia" | "phonophobia" | "aura";
+
+const SYMPTOMS: { key: BoolKey; label: string; no: string }[] = [
+  { key: "nausea", label: "Nausea", no: "No nausea" },
+  { key: "photophobia", label: "Light hurt", no: "Light was fine" },
+  { key: "phonophobia", label: "Sound hurt", no: "Sound was fine" },
+  { key: "aggravated_by_activity", label: "Worse moving", no: "Moving was fine" },
+  { key: "aura", label: "Aura", no: "No aura" },
+];
+
+/** Unrecorded -> yes -> no -> unrecorded. */
+export const nextTri = (v: boolean | null): boolean | null =>
+  v === null ? true : v === true ? false : null;
+
+const chipBase =
+  "flex min-h-11 items-center gap-1.5 rounded-full border px-3.5 text-sm transition active:scale-95";
+
+function TriChip({
+  label,
+  noLabel,
   value,
-  options,
   onChange,
 }: {
-  value: T | boolean | null;
-  options: { label: string; val: T | boolean }[];
-  onChange: (v: T | boolean | null) => void;
+  label: string;
+  noLabel: string;
+  value: boolean | null;
+  onChange: (v: boolean | null) => void;
+}) {
+  const state = value === null ? "not recorded" : value ? "yes" : "no";
+  return (
+    <button
+      onClick={() => onChange(nextTri(value))}
+      aria-label={`${label}: ${state}`}
+      className={`${chipBase} ${
+        value === true
+          ? "border-accent-400 bg-accent-500 text-white"
+          : value === false
+            ? "border-zinc-700 bg-zinc-900 text-zinc-500"
+            : "border-zinc-700 bg-zinc-800 text-zinc-300"
+      }`}
+    >
+      <span aria-hidden className="w-3 text-center text-xs">
+        {value === true ? "✓" : value === false ? "✕" : "+"}
+      </span>
+      {value === false ? noLabel : label}
+    </button>
+  );
+}
+
+function QualityChip({
+  label,
+  on,
+  onClick,
+}: {
+  label: string;
+  on: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div className="flex gap-2">
-      {options.map((o) => {
-        const on = value === o.val;
-        return (
-          <button
-            key={String(o.val)}
-            // Tapping the active choice again clears it back to unrecorded.
-            onClick={() => onChange(on ? null : o.val)}
-            className={`flex min-h-11 flex-1 items-center justify-center rounded-lg px-3 text-sm transition ${
-              on ? "bg-accent-500 text-white" : "bg-zinc-800 text-zinc-300"
-            }`}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
+    <button
+      onClick={onClick}
+      aria-pressed={on}
+      className={`${chipBase} ${
+        on ? "border-accent-400 bg-accent-500 text-white" : "border-zinc-700 bg-zinc-800 text-zinc-300"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="mt-3">
-      <p className="mb-1 text-xs uppercase tracking-wide text-zinc-400">{label}</p>
-      {children}
-    </div>
-  );
-}
-
-const yesNo = [
-  { label: "Yes", val: true },
-  { label: "No", val: false },
-];
 
 export default function SymptomDetails({
   value,
@@ -89,37 +120,32 @@ export default function SymptomDetails({
   onChange: (a: Attrs) => void;
 }) {
   const set = <K extends keyof Attrs>(k: K, v: Attrs[K]) => onChange({ ...value, [k]: v });
+  const setQuality = (q: "throbbing" | "pressing") =>
+    set("quality", value.quality === q ? null : q);
 
   return (
     <div>
       <HeadMap value={value.pain_regions} onChange={(ids) => set("pain_regions", ids)} />
 
-      <Row label="Pain quality">
-        <TriToggle
-          value={value.quality}
-          options={[
-            { label: "Throbbing", val: "throbbing" },
-            { label: "Pressing", val: "pressing" },
-          ]}
-          onChange={(v) => set("quality", v as Attrs["quality"])}
-        />
-      </Row>
+      <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Pain quality">
+        <QualityChip label="Throbbing" on={value.quality === "throbbing"} onClick={() => setQuality("throbbing")} />
+        <QualityChip label="Pressing" on={value.quality === "pressing"} onClick={() => setQuality("pressing")} />
+      </div>
 
-      <Row label="Worse with activity">
-        <TriToggle value={value.aggravated_by_activity} options={yesNo} onChange={(v) => set("aggravated_by_activity", v as boolean)} />
-      </Row>
-      <Row label="Nausea">
-        <TriToggle value={value.nausea} options={yesNo} onChange={(v) => set("nausea", v as boolean)} />
-      </Row>
-      <Row label="Light bothered you">
-        <TriToggle value={value.photophobia} options={yesNo} onChange={(v) => set("photophobia", v as boolean)} />
-      </Row>
-      <Row label="Sound bothered you">
-        <TriToggle value={value.phonophobia} options={yesNo} onChange={(v) => set("phonophobia", v as boolean)} />
-      </Row>
-      <Row label="Aura (visual / sensory warning)">
-        <TriToggle value={value.aura} options={yesNo} onChange={(v) => set("aura", v as boolean)} />
-      </Row>
+      <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Symptoms">
+        {SYMPTOMS.map((s) => (
+          <TriChip
+            key={s.key}
+            label={s.label}
+            noLabel={s.no}
+            value={value[s.key]}
+            onChange={(v) => set(s.key, v)}
+          />
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-zinc-500">
+        Tap once for yes, twice for no. Untouched means not recorded.
+      </p>
     </div>
   );
 }
