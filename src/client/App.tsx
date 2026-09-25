@@ -45,6 +45,7 @@ import Insights, { todayLocal } from "./Insights";
 import SeverityInput from "./SeverityInput";
 import AttackSheet, { type AttackDraft, type DoseView } from "./AttackSheet";
 import AttackDetail from "./AttackDetail";
+import AttackWizard from "./AttackWizard";
 import {
   loadPremOutbox,
   newPremonition,
@@ -862,8 +863,7 @@ export default function App() {
       </main>
 
       {endPanel && (
-        <AttackSheet
-          title="How was it?"
+        <AttackWizard
           initial={{
             started_at: endPanel.started_at,
             started_at_time_known: endPanel.time_known,
@@ -874,11 +874,6 @@ export default function App() {
           }}
           doses={(endPanel.doses ?? []).map(localDoseToView)}
           legacyMeds={endPanel.meds}
-          // It has just ended, so "30m ago" is the natural way to correct a time.
-          allowRelative
-          subtitle="The attack is saved. Everything below is optional."
-          saveLabel="Save details"
-          cancelLabel="Skip details"
           onSave={(d) => finishDetails(d)}
           onCancel={() => finishDetails(null)}
           onAddDose={(name, takenAt) => onLogDoseAt(endPanel.localId, name, takenAt)}

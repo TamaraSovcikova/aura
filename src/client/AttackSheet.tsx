@@ -89,7 +89,7 @@ function TimeCell({
  * The one time editor: an absolute datetime, plus quick "N ago" chips when the time
  * being set is near now.
  */
-function TimeEditor({
+export function TimeEditor({
   label,
   value,
   onChange,
@@ -164,7 +164,7 @@ function Card({
 }
 
 /** Medication: the doses themselves, addable and correctable at any time. */
-function DoseSection({
+export function DoseSection({
   doses,
   legacyMeds,
   onAddDose,
