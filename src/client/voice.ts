@@ -117,35 +117,71 @@ export function stripReplay(text: string, previous: string): string {
 }
 
 /**
+ * Why listening ended:
+ *   - "stopped": the user stopped it (or the session cap was reached).
+ *   - "paused": the browser would not restart the microphone after a pause. Chrome
+ *     on Android can refuse a start that no tap triggered, so continuing needs one
+ *     tap; the caller offers "Continue" and nothing already heard is lost.
+ *   - "failed": the microphone is not allowed or not available at all.
+ */
+export type DoneReason = "stopped" | "paused" | "failed";
+
+/** Wait before restarting after a pause; restarting inside `onend` is refused on
+ *  some Android builds while the previous run is still releasing the microphone. */
+export const RESTART_DELAY_MS = 250;
+const RETRY_DELAY_MS = 700;
+/** A restarted run that ends this fast with nothing heard was not really listening. */
+const DEAD_RUN_MS = 1500;
+const DEAD_RUNS_BEFORE_PAUSE = 3;
+
+/**
  * Start listening. `onText` receives the transcript of THIS session as it grows
  * (the caller is responsible for appending it to any pre-existing note).
  * Returns a stop function; `onDone` fires once listening has truly finished.
  */
 export function listen(
   onText: (sessionText: string) => void,
-  onDone: () => void
+  onDone: (reason: DoneReason) => void
 ): () => void {
   const Ctor = getCtor();
   if (!Ctor) {
-    onDone();
+    onDone("failed");
     return () => {};
   }
 
-  let stopped = false;
+  let finished = false;
+  let stopRequested = false;
   let committed = ""; // text from finished runs, carried across restarts
   let lastPhrase = ""; // the previous run's phrase, to strip if a new run replays it
   let current: SpeechRecognitionLike | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let deadRuns = 0;
+  let runs = 0;
   const startedAt = Date.now();
 
-  const startInstance = () => {
+  const finish = (reason: DoneReason) => {
+    if (finished) return;
+    finished = true;
+    if (timer) clearTimeout(timer);
+    onText(committed);
+    onDone(reason);
+  };
+
+  const startInstance = (retry = false) => {
     const rec = new Ctor();
     current = rec;
+    runs++;
+    const isRestart = runs > 1;
+    const runStarted = Date.now();
     let phrase = ""; // everything this run has heard so far, final or not
+    let heard = false;
+    let fatal: DoneReason | null = null;
     rec.lang = navigator.language || "en-US";
     rec.interimResults = true;
     rec.continuous = false; // one phrase per run; pauses restart it (see top)
 
     rec.onresult = (e) => {
+      heard = true;
       // Re-read every result of this run and merge: the platform may resend earlier
       // results, grow one cumulatively, or change an interim guess.
       const parts: string[] = [];
@@ -155,8 +191,10 @@ export function listen(
     };
 
     rec.onerror = (e) => {
-      if (e?.error && FATAL_ERRORS.has(e.error)) stopped = true;
-      // no-speech / aborted are expected during a long pause: let onend restart.
+      if (!e?.error || !FATAL_ERRORS.has(e.error)) return; // no-speech / aborted: a pause
+      // A permission error on the FIRST run means the mic is blocked. On a restart
+      // it means the browser wanted a tap to start again: pause, do not fail.
+      fatal = isRestart && e.error !== "audio-capture" ? "paused" : "failed";
     };
 
     rec.onend = () => {
@@ -167,35 +205,51 @@ export function listen(
         lastPhrase = phrase;
         phrase = "";
       }
-      const expired = Date.now() - startedAt > MAX_SESSION_MS;
-      if (stopped || expired) {
-        onText(committed);
-        onDone();
-        return;
-      }
-      try {
-        startInstance(); // a pause ended the run, not the user
-      } catch {
-        onText(committed);
-        onDone();
-      }
+      if (stopRequested || Date.now() - startedAt > MAX_SESSION_MS) return finish("stopped");
+      if (fatal) return finish(fatal);
+
+      // A run that ended almost at once, hearing nothing, was not really listening.
+      // A few in a row means the restarts are being refused silently.
+      deadRuns = isRestart && !heard && Date.now() - runStarted < DEAD_RUN_MS ? deadRuns + 1 : 0;
+      if (deadRuns >= DEAD_RUNS_BEFORE_PAUSE) return finish("paused");
+
+      // A pause ended the run, not the user: start again after a short gap.
+      timer = setTimeout(() => {
+        timer = null;
+        if (!stopRequested) startInstance();
+      }, RESTART_DELAY_MS);
     };
 
     try {
       rec.start();
     } catch {
-      onDone();
+      if (!isRestart) return finish("failed");
+      if (!retry) {
+        timer = setTimeout(() => {
+          timer = null;
+          if (!stopRequested) startInstance(true);
+        }, RETRY_DELAY_MS);
+        return;
+      }
+      finish("paused");
     }
   };
 
   startInstance();
 
   return () => {
-    stopped = true;
+    stopRequested = true;
+    if (timer) {
+      // Between runs: nothing is listening, so finish now.
+      clearTimeout(timer);
+      timer = null;
+      finish("stopped");
+      return;
+    }
     try {
       current?.stop();
     } catch {
-      onDone();
+      finish("stopped");
     }
   };
 }
