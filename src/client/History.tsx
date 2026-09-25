@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { SEVERITY_MAX, type Episode } from "../shared/types";
 import { classifyAttack, hasAnyAttribute, rowToAttackAttributes } from "../shared/ichd3";
 import { attackTimes, dayShort } from "./time";
@@ -13,7 +14,6 @@ import { attackTimes, dayShort } from "./time";
 // what was done about it. Times and their estimate markers come from ./time, so the
 // log cannot drift from the live screen or the sheet.
 
-const monthKey = (iso: string) => iso.slice(0, 7);
 
 const monthLabel = (key: string) =>
   new Date(`${key}-01T00:00:00Z`).toLocaleDateString([], {
@@ -119,16 +119,20 @@ function dayFill(sev: number | null): React.CSSProperties {
 /**
  * One month as a grid, Monday first. A day with an attack is shaded by the worst
  * severity logged that day; a dot marks a day medication was taken. Tapping a
- * shaded day opens its (first) attack, the same as tapping its row.
+ * shaded day selects it, and the list under the calendar narrows to that day.
  */
 function MonthGrid({
   monthKey: key,
   rows,
-  onSelect,
+  selectedDay,
+  today,
+  onPickDay,
 }: {
   monthKey: string;
   rows: Episode[];
-  onSelect: (e: Episode) => void;
+  selectedDay: string | null;
+  today: string;
+  onPickDay: (day: string | null) => void;
 }) {
   const byDay = new Map<string, Episode[]>();
   for (const e of rows) {
@@ -148,21 +152,24 @@ function MonthGrid({
   ];
 
   return (
-    <div className="px-3 pb-2 pt-3">
-      <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-zinc-500">
+    <div>
+      <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] text-zinc-500">
         {WEEKDAYS.map((w, i) => (
           <span key={i}>{w}</span>
         ))}
       </div>
-      <div className="mt-1 grid grid-cols-7 gap-1">
+      <div className="mt-1.5 grid grid-cols-7 gap-1.5">
         {cells.map((c, i) => {
           if (!c) return <span key={`pad-${i}`} />;
           const hits = byDay.get(c.date);
+          const isToday = c.date === today;
           if (!hits) {
             return (
               <span
                 key={c.date}
-                className="flex aspect-square items-center justify-center rounded-md bg-zinc-800/40 text-[11px] tabular-nums text-zinc-500"
+                className={`flex aspect-square items-center justify-center rounded-lg bg-zinc-800/40 text-xs tabular-nums ${
+                  isToday ? "text-zinc-100 ring-1 ring-zinc-500" : "text-zinc-500"
+                }`}
               >
                 {c.day}
               </span>
@@ -171,13 +178,17 @@ function MonthGrid({
           const sevs = hits.map((h) => h.severity).filter((s): s is number => s !== null);
           const worst = sevs.length ? Math.max(...sevs) : null;
           const medicated = hits.some((h) => (h.dose_count ?? 0) > 0 || Boolean(h.meds?.trim()));
+          const selected = selectedDay === c.date;
           return (
             <button
               key={c.date}
-              onClick={() => onSelect(hits[0])}
+              onClick={() => onPickDay(selected ? null : c.date)}
+              aria-pressed={selected}
               aria-label={`${dayShort(hits[0].started_at)}: ${hits.length === 1 ? "1 attack" : `${hits.length} attacks`}${worst !== null ? `, worst ${worst}/${SEVERITY_MAX}` : ""}${medicated ? ", medication taken" : ""}`}
               style={dayFill(worst)}
-              className="relative flex aspect-square items-center justify-center rounded-md text-[11px] font-medium tabular-nums text-white transition active:scale-95"
+              className={`relative flex aspect-square items-center justify-center rounded-lg text-xs font-medium tabular-nums text-white transition active:scale-95 ${
+                selected ? "ring-2 ring-white" : isToday ? "ring-1 ring-zinc-300" : ""
+              }`}
             >
               {c.day}
               {medicated && (
@@ -211,6 +222,57 @@ function Legend() {
   );
 }
 
+/** Every month from `from` to `to` inclusive, as YYYY-MM keys. */
+function monthRange(from: string, to: string): string[] {
+  const out: string[] = [];
+  let [y, m] = from.split("-").map(Number);
+  const [ty, tm] = to.split("-").map(Number);
+  while (y < ty || (y === ty && m <= tm)) {
+    out.push(`${y}-${String(m).padStart(2, "0")}`);
+    m++;
+    if (m > 12) {
+      m = 1;
+      y++;
+    }
+  }
+  return out;
+}
+
+const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+function Summary({ rows }: { rows: Episode[] }) {
+  const days = new Set(rows.map(dayOf)).size;
+  const migraine = rows.filter((e) => verdictLabel(e)?.text.startsWith("migraine")).length;
+  const sevs = rows.map((e) => e.severity).filter((s): s is number => s !== null);
+  const doses = rows.reduce((a, e) => a + (e.dose_count ?? 0), 0);
+  const items = [
+    { v: days, l: days === 1 ? "headache day" : "headache days" },
+    { v: migraine, l: "migraine" },
+    { v: sevs.length ? `${Math.max(...sevs)}/${SEVERITY_MAX}` : "–", l: "worst" },
+    { v: doses, l: doses === 1 ? "dose" : "doses" },
+  ];
+  return (
+    <div className="grid grid-cols-4 gap-2">
+      {items.map((it) => (
+        <div key={it.l} className="rounded-xl bg-zinc-900/60 px-2 py-2 text-center">
+          <p className="text-lg font-semibold tabular-nums text-zinc-100">{it.v}</p>
+          <p className="text-[10px] text-zinc-400">{it.l}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The log as a calendar: one month at a time, stepped with arrows or picked from a
+ * dropdown, with that month's numbers above the grid and its attacks below. Tapping
+ * a day narrows the list to that day; tapping an attack opens it.
+ *
+ * It opens on the month of the latest attack, since that is what is looked up most.
+ */
 export default function History({
   episodes,
   onSelect,
@@ -218,6 +280,10 @@ export default function History({
   episodes: Episode[];
   onSelect: (e: Episode) => void;
 }) {
+  const latestMonth = episodes.length ? dayOf(episodes[0]).slice(0, 7) : localToday().slice(0, 7);
+  const [month, setMonth] = useState(latestMonth);
+  const [day, setDay] = useState<string | null>(null);
+
   if (episodes.length === 0) {
     return (
       <p className="mt-16 text-center text-sm text-zinc-400">
@@ -226,42 +292,84 @@ export default function History({
     );
   }
 
-  // Grouped by month so a long history is browsable rather than an endless column.
-  const groups: Array<{ key: string; rows: Episode[] }> = [];
-  for (const e of episodes) {
-    const k = monthKey(e.started_at);
-    const last = groups[groups.length - 1];
-    if (last && last.key === k) last.rows.push(e);
-    else groups.push({ key: k, rows: [e] });
-  }
+  const keys = episodes.map((e) => dayOf(e).slice(0, 7));
+  const first = keys.reduce((a, b) => (a < b ? a : b));
+  const lastKey = [keys.reduce((a, b) => (a > b ? a : b)), localToday().slice(0, 7)].sort().at(-1)!;
+  const months = monthRange(first, lastKey);
+  const idx = months.indexOf(month);
+  const show = (m: string) => {
+    setMonth(m);
+    setDay(null);
+  };
+
+  const inMonth = episodes.filter((e) => dayOf(e).startsWith(month));
+  const listed = day ? inMonth.filter((e) => dayOf(e) === day) : inMonth;
 
   return (
-    <section className="flex flex-col gap-6">
-      <Legend />
-      {groups.map((g) => {
-        const headacheDays = new Set(g.rows.map(dayOf)).size;
-        return (
-          <div key={g.key}>
-            <h2 className="mb-2 flex items-baseline justify-between text-xs font-medium uppercase tracking-wide text-zinc-400">
-              <span>{monthLabel(g.key)}</span>
-              <span className="normal-case tracking-normal tabular-nums text-zinc-500">
-                {headacheDays} headache {headacheDays === 1 ? "day" : "days"}
-              </span>
-            </h2>
-            <div className="overflow-hidden rounded-xl bg-zinc-900/60">
-              <MonthGrid monthKey={g.key} rows={g.rows} onSelect={onSelect} />
-              <ul className="divide-y divide-zinc-800 border-t border-zinc-800">
-                {g.rows.map((e) => (
-                  <Row key={e.id} e={e} onSelect={onSelect} />
-                ))}
-              </ul>
-            </div>
-          </div>
-        );
-      })}
-      <p className="text-center text-xs text-zinc-400">
-        Tap an entry to edit or delete it.
-      </p>
+    <section className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          onClick={() => show(months[idx - 1])}
+          disabled={idx <= 0}
+          aria-label="Previous month"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800/70 text-lg text-zinc-200 disabled:opacity-30"
+        >
+          ‹
+        </button>
+        <select
+          value={month}
+          onChange={(e) => show(e.target.value)}
+          aria-label="Month"
+          className="min-h-11 flex-1 appearance-none rounded-full bg-zinc-800/70 px-4 text-center text-base font-medium text-zinc-100 outline-none"
+        >
+          {[...months].reverse().map((m) => (
+            <option key={m} value={m}>
+              {monthLabel(m)}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => show(months[idx + 1])}
+          disabled={idx >= months.length - 1}
+          aria-label="Next month"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800/70 text-lg text-zinc-200 disabled:opacity-30"
+        >
+          ›
+        </button>
+      </div>
+
+      <Summary rows={inMonth} />
+
+      <div className="rounded-2xl bg-zinc-900/60 p-3">
+        <MonthGrid monthKey={month} rows={inMonth} selectedDay={day} today={localToday()} onPickDay={setDay} />
+        <div className="mt-3">
+          <Legend />
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+            {day ? dayShort(`${day}T12:00:00Z`) : `All of ${monthLabel(month).split(" ")[0]}`}
+          </h2>
+          {day && (
+            <button onClick={() => setDay(null)} className="min-h-11 text-xs text-zinc-400 underline">
+              show whole month
+            </button>
+          )}
+        </div>
+        {listed.length === 0 ? (
+          <p className="rounded-xl bg-zinc-900/60 px-4 py-6 text-center text-sm text-zinc-500">
+            No attacks logged this month.
+          </p>
+        ) : (
+          <ul className="divide-y divide-zinc-800 rounded-xl bg-zinc-900/60">
+            {listed.map((e) => (
+              <Row key={e.id} e={e} onSelect={onSelect} />
+            ))}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }

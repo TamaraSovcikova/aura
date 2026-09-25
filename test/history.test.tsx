@@ -109,13 +109,15 @@ describe("History rows", () => {
       <History
         episodes={[
           ep({ id: 7, started_at_time_known: 0 }),
-          ep({ id: 8, started_at: "2026-06-02T09:00:00.000Z", ended_at: "2026-06-02T11:00:00.000Z" }),
+          ep({ id: 8, started_at: "2026-06-02T09:00:00.000Z", local_date: "2026-06-02", ended_at: "2026-06-02T11:00:00.000Z" }),
         ]}
         onSelect={() => {}}
       />
     );
-    expect(screen.getByText(/July 2026/)).toBeInTheDocument();
-    expect(screen.getByText(/June 2026/)).toBeInTheDocument();
+    // Both months are reachable from the month picker; July, the latest, is shown.
+    expect(screen.getByRole("option", { name: /July 2026/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /June 2026/ })).toBeInTheDocument();
+    expect(rowButtons()).toHaveLength(1);
     expect(rowButtons()[0].textContent).toMatch(/~/);
   });
 
@@ -136,9 +138,36 @@ describe("History rows", () => {
     );
     const cell = screen.getByRole("button", { name: /attacks, worst 8\/10, medication taken/ });
     expect(cell.textContent).toBe("15");
+    // Tapping a day selects it and narrows the list; tapping a row opens the attack.
     fireEvent.click(cell);
+    expect(cell).toHaveAttribute("aria-pressed", "true");
+    expect(rowButtons()).toHaveLength(2);
+    fireEvent.click(rowButtons()[0]);
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 9 }));
-    expect(screen.getByText("1 headache day")).toBeInTheDocument();
+    expect(screen.getByText("headache day")).toBeInTheDocument(); // month summary: 1 day
+  });
+
+  it("shows one month at a time, stepped with arrows or the dropdown", () => {
+    render(
+      <History
+        episodes={[
+          ep({ id: 20 }), // July 2026, the latest: shown first
+          ep({ id: 21, started_at: "2026-05-10T09:00:00.000Z", local_date: "2026-05-10", ended_at: "2026-05-10T11:00:00.000Z" }),
+        ]}
+        onSelect={() => {}}
+      />
+    );
+    const month = screen.getByRole("combobox", { name: "Month" }) as HTMLSelectElement;
+    expect(month.value).toBe("2026-07");
+    expect(rowButtons()).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous month" })); // June: empty
+    expect(month.value).toBe("2026-06");
+    expect(screen.getByText(/No attacks logged this month/)).toBeInTheDocument();
+
+    fireEvent.change(month, { target: { value: "2026-05" } });
+    expect(rowButtons()[0].textContent).toMatch(/10 May|May 10/); // locale decides the order
+    expect(screen.getByRole("button", { name: "Previous month" })).toBeDisabled();
   });
 
   it("says so plainly when there is nothing logged", () => {
