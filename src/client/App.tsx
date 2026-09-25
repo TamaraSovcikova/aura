@@ -17,6 +17,8 @@ import {
   apiPremonition,
   apiStart,
   hasPin,
+  clearPin,
+  verifyPin,
   setPin,
   UnauthorizedError,
 } from "./api";
@@ -138,7 +140,17 @@ export default function App() {
   // data-loading effect off this callback, and a fresh lambda each second would
   // make it refetch every summary/pattern/med endpoint once a second during an
   // ongoing attack (when the elapsed timer is re-rendering App).
-  const handleUnauthorized = useCallback(() => setPinReady(false), []);
+  // A rejected PIN must not survive a reload, or the app reopens with it and bounces
+  // straight back to this screen again.
+  useEffect(() => {
+    if (!pinReady) clearPin();
+  }, [pinReady]);
+
+  // Any tab that gets a 401 lands here, so the PIN screen always says why it is back.
+  const handleUnauthorized = useCallback(() => {
+    setError("That PIN was rejected. Enter it again.");
+    setPinReady(false);
+  }, []);
 
   // The whole log, not a window onto it. This fetched 20 rows while the history ran
   // to a couple of hundred, so most of it could not be reached from the UI at all.
@@ -1186,6 +1198,23 @@ function PinGate({
   onSubmit: () => void;
 }) {
   const [value, setValue] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [rejected, setRejected] = useState(false);
+
+  const submit = async () => {
+    const pin = value.trim();
+    if (!pin || checking) return;
+    setChecking(true);
+    const result = await verifyPin(pin);
+    setChecking(false);
+    if (result === "wrong") {
+      setRejected(true);
+      return;
+    }
+    setPin(pin);
+    onSubmit();
+  };
+
   return (
     <div className="mx-auto flex min-h-full max-w-md flex-col items-center justify-center gap-4 px-6">
       <h1 className="text-2xl font-bold text-zinc-100">Aura</h1>
@@ -1195,20 +1224,26 @@ function PinGate({
       <input
         type="password"
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          setRejected(false);
+        }}
+        onKeyDown={(e) => e.key === "Enter" && void submit()}
         placeholder="PIN"
+        aria-label="PIN"
         className="w-full rounded-lg bg-zinc-800 px-3 py-3 text-center text-zinc-100 placeholder:text-zinc-400 outline-none"
       />
-      {error && <p className="text-sm text-rose-400">{error}</p>}
+      {rejected ? (
+        <p className="text-sm text-rose-400">That PIN is not the one set on the server. Try again.</p>
+      ) : (
+        error && <p className="text-sm text-rose-400">{error}</p>
+      )}
       <button
-        onClick={() => {
-          if (!value) return;
-          setPin(value);
-          onSubmit();
-        }}
-        className="w-full rounded-lg bg-accent-500 py-3 font-medium text-white"
+        onClick={() => void submit()}
+        disabled={checking}
+        className="w-full rounded-lg bg-accent-500 py-3 font-medium text-white disabled:opacity-60"
       >
-        Unlock
+        {checking ? "Checking…" : "Unlock"}
       </button>
     </div>
   );

@@ -26,6 +26,7 @@ const PIN_KEY = "aura_pin";
 export const getPin = (): string => localStorage.getItem(PIN_KEY) ?? "";
 export const setPin = (pin: string): void => localStorage.setItem(PIN_KEY, pin);
 export const hasPin = (): boolean => getPin().length > 0;
+export const clearPin = (): void => localStorage.removeItem(PIN_KEY);
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -63,6 +64,25 @@ export async function apiEnd(id: number, body: EndBody): Promise<Episode> {
     body: JSON.stringify(body),
   });
   return parse<Episode>(r, "end");
+}
+
+/**
+ * Check a PIN against the server before accepting it. Without this a wrong PIN
+ * looked accepted: the first calls treat failures as "offline", so the app opened,
+ * then bounced back to the PIN screen the moment a tab made an authorised call.
+ * Resolves "ok", "wrong", or "offline" (cannot tell; the PIN is kept and checked
+ * again on the next call).
+ */
+export async function verifyPin(pin: string): Promise<"ok" | "wrong" | "offline"> {
+  try {
+    const r = await fetch("/api/episodes/current", {
+      headers: { Authorization: `Bearer ${pin}` },
+    });
+    if (r.status === 401) return "wrong";
+    return r.ok ? "ok" : "offline";
+  } catch {
+    return "offline";
+  }
 }
 
 export async function apiCurrent(): Promise<Episode | null> {
