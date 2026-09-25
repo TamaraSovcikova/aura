@@ -46,6 +46,8 @@ import SeverityInput from "./SeverityInput";
 import AttackSheet, { type AttackDraft, type DoseView } from "./AttackSheet";
 import AttackDetail from "./AttackDetail";
 import AttackWizard from "./AttackWizard";
+import MoreMenu from "./MoreMenu";
+import { cycleContext, normalizeStarts } from "../shared/cycle";
 import {
   loadPremOutbox,
   newPremonition,
@@ -713,6 +715,7 @@ export default function App() {
     : null;
 
   const periodToday = cycleEvents.find((e) => e.local_date === todayLocal()) ?? null;
+  const cycleDay = cycleContext(todayLocal(), normalizeStarts(cycleEvents.map((e) => e.local_date))).cycle_day;
 
   // The edit sheet, built once and rendered from whichever tab opened it.
   const editSheet = editing ? (
@@ -752,7 +755,10 @@ export default function App() {
     <div className="mx-auto flex min-h-full max-w-md flex-col px-6 pb-28 pt-8">
       <header className="mb-8 flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight text-zinc-200">Aura</h1>
-        <StatusPill online={online} pending={pending} />
+        <div className="flex items-center gap-1">
+          <StatusPill online={online} pending={pending} />
+          <MoreMenu onUnauthorized={handleUnauthorized} onLock={() => setPinReady(false)} />
+        </div>
       </header>
       {children}
       <TabBar tab={tab} onChange={setTab} />
@@ -789,7 +795,10 @@ export default function App() {
         <h1 className="text-lg font-semibold tracking-tight text-zinc-200">
           Aura
         </h1>
-        <StatusPill online={online} pending={pending} />
+        <div className="flex items-center gap-1">
+          <StatusPill online={online} pending={pending} />
+          <MoreMenu onUnauthorized={handleUnauthorized} onLock={() => setPinReady(false)} />
+        </div>
       </header>
 
       <main className="flex flex-1 flex-col items-center justify-center gap-6">
@@ -855,6 +864,11 @@ export default function App() {
               >
                 Period started today
               </button>
+            )}
+            {cycleDay !== null && !periodToday && (
+              // Where she stands in the cycle is status, not a finding, so it sits
+              // here beside the one-tap log rather than on Insights.
+              <p className="-mt-3 text-[11px] text-zinc-500">Cycle day {cycleDay}</p>
             )}
           </>
         )}

@@ -29,14 +29,11 @@ import {
   apiPatterns,
   apiSummary,
   apiTriggers,
-  exportCsvUrl,
-  exportDoctorUrl,
-  exportObsidianUrl,
   type Patterns as PatternsData,
   UnauthorizedError,
 } from "./api";
 import type { MedResponse } from "../worker/meds";
-import { cycleContext, normalizeStarts } from "../shared/cycle";
+import { normalizeStarts } from "../shared/cycle";
 import { localDateInTz } from "../shared/health";
 import { currentTz } from "./geo";
 import { HeadHeatMap } from "./HeadMap";
@@ -110,16 +107,16 @@ function Headline({ s }: { s: Summary }) {
   const perMonth = complete.length
     ? (complete.reduce((a, m) => a + m.headache_days, 0) / complete.length).toFixed(1)
     : null;
+  const since = s.first_day ? fullDate(s.first_day).split(" ").slice(1).join(" ") : null;
   return (
     <section>
       <div className="flex items-baseline gap-8">
         <Stat value={s.headache_days} label="headache days" />
         <Stat value={s.migraine_days} label="migraine days" tone="text-rose-300" />
+        {perMonth && <Stat value={perMonth} label="a month" />}
       </div>
-      <p className="mt-3 text-sm text-zinc-400">
-        {perMonth ? `About ${perMonth} a month. ` : ""}
-        {s.episodes} episodes, {s.first_day ? fullDate(s.first_day) : "?"} to{" "}
-        {s.last_day ? fullDate(s.last_day) : "?"}.
+      <p className="mt-2 text-xs text-zinc-500">
+        {since ? `Since ${since}. ` : ""}Migraine days meet the ICHD-3 criteria; not a diagnosis.
       </p>
     </section>
   );
@@ -131,15 +128,18 @@ function HowOften({ s }: { s: Summary }) {
   const t = s.trend;
   return (
     <Section title="How often">
-      {t.enough_data ? (
+      {t.enough_data && (
         <p className="mb-3 text-sm text-zinc-300">
-          Last 3 complete months: {t.recent_mean_headache_days} a month, against{" "}
-          {t.prior_mean_headache_days} in the 3 before ({t.percent_change ?? 0}%).
+          <span
+            className={`mr-1.5 rounded-full px-2 py-0.5 text-xs tabular-nums ${
+              (t.percent_change ?? 0) < 0 ? "bg-accent-900 text-accent-300" : (t.percent_change ?? 0) > 0 ? "bg-rose-950 text-rose-300" : "bg-zinc-800 text-zinc-300"
+            }`}
+          >
+            {(t.percent_change ?? 0) > 0 ? "+" : ""}
+            {t.percent_change ?? 0}%
+          </span>
+          last 3 months vs the 3 before
         </p>
-      ) : (
-        <div className="mb-3">
-          <Gate>Not enough complete months yet to compare one quarter with the last.</Gate>
-        </div>
       )}
       <ul className="flex flex-col gap-1.5">
         {months.map((m) => (
@@ -164,37 +164,7 @@ function HowOften({ s }: { s: Summary }) {
         ))}
       </ul>
       {months.some((m) => !m.complete) && (
-        <p className="mt-2 text-xs text-zinc-400">
-          Grey months were only partly observed, so they sit out of the averages.
-        </p>
-      )}
-    </Section>
-  );
-}
-
-function MigraineOrHeadache({ s }: { s: Summary }) {
-  const c = s.classified;
-  const dayWord = s.migraine_days === 1 ? "day" : "days";
-  return (
-    <Section title="Migraine or headache">
-      {c.attacks_with_attributes === 0 ? (
-        <Gate>
-          No attacks carry symptom details yet. Add them when an attack ends and Aura
-          checks each against the ICHD-3 criteria.
-        </Gate>
-      ) : (
-        <>
-          <p className="text-sm leading-relaxed text-zinc-200">
-            {c.migraine} of {c.attacks_with_attributes} attacks you have described meet the
-            ICHD-3 criteria for migraine
-            {c.probable_migraine ? `, ${c.probable_migraine} probably do` : ""}. That is{" "}
-            {s.migraine_days} migraine {dayWord}.
-          </p>
-          <p className="mt-1.5 text-xs text-zinc-400">
-            Which criteria an attack meets, not a diagnosis. The imported diary has no
-            symptoms, so it counts as headache days only.
-          </p>
-        </>
+        <p className="mt-2 text-[11px] text-zinc-500">Grey: part month, left out of averages.</p>
       )}
     </Section>
   );
@@ -236,18 +206,13 @@ function WhenTheyHappen({ p }: { p: PatternsData }) {
           shown: d.rate == null ? "" : pct(d.rate),
         }))}
       />
-      <p className="mt-1 text-[11px] text-zinc-500">Share of each weekday that was a headache day.</p>
-      <div className="mt-2">
-        {dow.verdict === "insufficient data" ? (
-          <Gate>Not enough days yet to say whether a weekday matters.</Gate>
-        ) : (
-          <p className="text-xs text-zinc-400">
-            {dow.verdict === "possible pattern"
-              ? "Headache days lean toward some weekdays more than others (an association, not a cause)."
-              : "No weekday carries more headache days than another."}
-          </p>
-        )}
-      </div>
+      <p className="mt-2 text-xs text-zinc-400">
+        {dow.verdict === "insufficient data"
+          ? "Not enough days yet."
+          : dow.verdict === "possible pattern"
+            ? "Some weekdays stand out."
+            : "No weekday stands out."}
+      </p>
 
       <div className="mt-5">
         <SubHead>Across the day</SubHead>
@@ -263,22 +228,13 @@ function WhenTheyHappen({ p }: { p: PatternsData }) {
             />
           </div>
         )}
-        {tod.verdict === "insufficient data" ? (
-          <Gate>
-            Needs 20 attacks with a known onset time ({tod.known_onset_attacks} so far).
-          </Gate>
-        ) : tod.verdict === "possible pattern" ? (
-          <p className="text-sm text-zinc-200">
-            Attacks tend to start around{" "}
-            <span className="tabular-nums">{tod.peak_hour}</span>, across{" "}
-            {tod.known_onset_attacks} with a known onset.
-          </p>
-        ) : (
-          <p className="text-xs text-zinc-400">
-            No time of day stands out, across {tod.known_onset_attacks} attacks with a
-            known onset.
-          </p>
-        )}
+        <p className="text-xs text-zinc-400">
+          {tod.verdict === "insufficient data"
+            ? `Needs 20 attacks with a known start (${tod.known_onset_attacks} so far).`
+            : tod.verdict === "possible pattern"
+              ? `Most start around ${tod.peak_hour}.`
+              : "No time of day stands out."}
+        </p>
       </div>
     </Section>
   );
@@ -296,8 +252,7 @@ function Medication({ s, m }: { s: Summary; m: MedResponse | null }) {
       <SubHead>Does it help?</SubHead>
       {!m || m.verdict !== "summary" ? (
         <Gate>
-          {m?.message ??
-            "No doses logged yet. Log one when you take something, and mark it when it helps."}
+          {m?.message ?? "No doses logged yet."}
         </Gate>
       ) : (
         <div className="flex gap-3">
@@ -324,10 +279,7 @@ function Medication({ s, m }: { s: Summary; m: MedResponse | null }) {
       <div className="mt-5">
         <SubHead>How often are you taking it?</SubHead>
         {rows.length === 0 ? (
-          <Gate>
-            No medication recorded yet, so there is no day count to compare with the
-            ICHD-3 overuse thresholds.
-          </Gate>
+          <Gate>No medication recorded yet.</Gate>
         ) : (
           <>
             <table className="w-full text-sm">
@@ -366,9 +318,8 @@ function Medication({ s, m }: { s: Summary; m: MedResponse | null }) {
                 ))}
               </tbody>
             </table>
-            <p className="mt-2 text-xs text-zinc-400">
-              Red flags an ICHD-3 overuse day count (triptans 10, analgesics 15). Sustained
-              past three months, worth showing a neurologist.
+            <p className="mt-2 text-[11px] text-zinc-500">
+              Red: ICHD-3 overuse level (triptan 10+, analgesic 15+ days a month).
             </p>
           </>
         )}
@@ -393,9 +344,9 @@ function WhereItHurts({ episodes }: { episodes: Episode[] }) {
     <Section title="Where it hurts">
       <HeadHeatMap counts={counts} />
       <p className="mt-2 text-sm text-zinc-200">
-        Most often: {topLabel.toLowerCase()}, in {top[1]} of {painted} attacks with a painted map.
+        Most often: {topLabel.toLowerCase()}{" "}
+        <span className="text-zinc-500">({top[1]} of {painted})</span>
       </p>
-      <p className="mt-1 text-xs text-zinc-400">Deeper red means painted more often.</p>
     </Section>
   );
 }
@@ -429,27 +380,21 @@ function ForestRow({ f }: { f: FactorResult }) {
 
 function Weather({ t }: { t: TriggerAnalysis }) {
   const tested = t.factors.filter((f) => f.verdict !== "insufficient data");
-  const waiting = t.factors.filter((f) => f.verdict === "insufficient data");
   const hits = tested.filter((f) => f.verdict === "possible association");
-  const n = tested[0];
   return (
-    <Section title="Weather and other triggers">
+    <Section title="Weather">
       {tested.length === 0 ? (
-        <Gate>Needs more days on record before any factor can be tested.</Gate>
+        <Gate>Needs more days on record.</Gate>
       ) : (
         <>
-          <p className="text-sm leading-relaxed text-zinc-200">
+          <p className="text-sm text-zinc-200">
             {hits.length
-              ? `${hits.length} of ${tested.length} factors show a possible association. An association, not a cause.`
-              : `None of ${tested.length} factors differs between headache days and other days.`}
-          </p>
-          <p className="mt-1 text-xs text-zinc-400">
-            {n.n_headache_days} headache days against {n.n_control_days} other days, compared within the
-            same place and month, corrected for testing {tested.length} factors at once.
+              ? `Possible link: ${hits.map((h) => h.label.replace(/ \(.*\)$/, "").toLowerCase()).join(", ")}.`
+              : "No weather factor differs on headache days."}
           </p>
           <div className="mt-2 flex justify-between text-[10px] text-zinc-500">
-            <span>lower on headache days</span>
-            <span>higher</span>
+            <span>← lower on headache days</span>
+            <span>higher →</span>
           </div>
           <ul className="divide-y divide-zinc-800/70">
             {tested.map((f) => (
@@ -457,18 +402,9 @@ function Weather({ t }: { t: TriggerAnalysis }) {
             ))}
           </ul>
           <p className="mt-1 text-[11px] text-zinc-500">
-            Each line is the 95% range of the difference. A line crossing the centre is no evidence;
-            one just clear of it can still be, because the verdict also corrects for testing several
-            factors at once and ignores differences too small to matter.
+            Lines show the 95% range, corrected for testing {tested.length} factors.
           </p>
         </>
-      )}
-      {waiting.length > 0 && (
-        <div className="mt-3">
-          <Gate>
-            Still collecting: {waiting.map((f) => f.label.replace(/ \(.*\)$/, "").toLowerCase()).join(", ")}.
-          </Gate>
-        </div>
       )}
     </Section>
   );
@@ -479,7 +415,6 @@ function Weather({ t }: { t: TriggerAnalysis }) {
  *  consistent answer. */
 function Cycle({ events, a }: { events: CycleEvent[]; a: MenstrualAnalysis | null }) {
   const starts = normalizeStarts(events.map((e) => e.local_date));
-  const ctx = cycleContext(todayLocal(), starts);
   const earned = a?.enough_data && a.odds_ratio !== null;
 
   return (
@@ -507,21 +442,16 @@ function Cycle({ events, a }: { events: CycleEvent[]; a: MenstrualAnalysis | nul
               </div>
             ))}
           </div>
-          <p className="mt-2 text-xs text-zinc-400">
-            Share of days that were headache days. 95% range {a.ci_low?.toFixed(1)} to{" "}
-            {a.ci_high?.toFixed(1)}×,{" "}
-            {a.verdict === "possible association" ? "a possible association, not a cause" : a.verdict}.
+          <p className="mt-2 text-[11px] text-zinc-500">
+            Share of days with a headache. 95% range {a.ci_low?.toFixed(1)}–{a.ci_high?.toFixed(1)}×.
           </p>
         </>
       ) : (
         <Gate>
           {starts.length === 0
-            ? "No period starts logged yet. One tap a month on Today is all this needs."
-            : `${starts.length} period start${starts.length === 1 ? "" : "s"} logged. The perimenstrual answer takes about six months of tapping to earn.`}
+            ? "No period starts logged yet."
+            : `${starts.length} period start${starts.length === 1 ? "" : "s"} logged; needs about six months.`}
         </Gate>
-      )}
-      {ctx.cycle_day !== null && (
-        <p className="mt-2 text-xs text-zinc-500">Today is day {ctx.cycle_day} of the current cycle.</p>
       )}
     </Section>
   );
@@ -567,67 +497,6 @@ function StillLearning({ s }: { s: Summary }) {
         </Gate>
       )}
     </section>
-  );
-}
-
-function Exports({ onUnauthorized }: { onUnauthorized: () => void }) {
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const download = async (kind: "csv" | "doctor" | "obsidian") => {
-    setBusy(kind);
-    try {
-      const url =
-        kind === "csv"
-          ? await exportCsvUrl()
-          : kind === "obsidian"
-            ? await exportObsidianUrl()
-            : await exportDoctorUrl();
-      const a = document.createElement("a");
-      a.href = url;
-      if (kind === "csv") a.download = "aura-episodes.csv";
-      else if (kind === "obsidian") a.download = "Aura-snapshot.md";
-      else {
-        a.target = "_blank";
-        a.rel = "noopener";
-      }
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (e) {
-      if (e instanceof UnauthorizedError) onUnauthorized();
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <Section title="Export">
-      <div className="flex gap-2">
-        <button
-          disabled={busy !== null}
-          onClick={() => download("doctor")}
-          className="flex-1 rounded-lg bg-zinc-800 min-h-11 py-2.5 text-sm text-zinc-200 transition active:scale-95 disabled:opacity-50"
-        >
-          {busy === "doctor" ? "Preparing…" : "Summary to print"}
-        </button>
-        <button
-          disabled={busy !== null}
-          onClick={() => download("csv")}
-          className="rounded-lg bg-zinc-800 px-4 min-h-11 py-2.5 text-sm text-zinc-400 transition active:scale-95 disabled:opacity-50"
-        >
-          {busy === "csv" ? "…" : "CSV"}
-        </button>
-      </div>
-      <button
-        disabled={busy !== null}
-        onClick={() => download("obsidian")}
-        className="mt-2 w-full rounded-lg bg-zinc-800 min-h-11 py-2.5 text-sm text-zinc-400 transition active:scale-95 disabled:opacity-50"
-      >
-        {busy === "obsidian" ? "…" : "Obsidian snapshot (.md)"}
-      </button>
-      <p className="mt-2 text-xs text-zinc-400">
-        The summary opens in a new tab to print to PDF.
-      </p>
-    </Section>
   );
 }
 
@@ -687,14 +556,12 @@ export default function Insights({ onUnauthorized }: { onUnauthorized: () => voi
     <div className="flex flex-col gap-9 pb-4">
       <Headline s={summary} />
       <HowOften s={summary} />
-      <MigraineOrHeadache s={summary} />
       <WhereItHurts episodes={episodes} />
       {patterns && <WhenTheyHappen p={patterns} />}
       {triggers && <Weather t={triggers} />}
       <Medication s={summary} m={meds} />
       <Cycle events={cycle} a={cycleAnalysis} />
       <StillLearning s={summary} />
-      <Exports onUnauthorized={onUnauthorized} />
     </div>
   );
 }
