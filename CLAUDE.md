@@ -74,5 +74,5 @@ Tools: `get_overview`, `summary`, `monthly_headache_days`, `headache_days_trend`
 
 ## Gotchas
 
-- Do not add comprehensive logging fields. Collecting less is the whole thesis.
+- Do not add comprehensive logging fields. The app is designed to ask for as little as possible.
 - Migrations are additive. Editing an applied migration does not re-run it in production.

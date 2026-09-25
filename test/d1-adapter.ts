@@ -1,5 +1,5 @@
 // Minimal D1Database adapter over Node's built-in node:sqlite (Node 22.5+).
-// Executes real SQL against an in-memory database so tests genuinely exercise
+// Executes real SQL against an in-memory database so tests exercise
 // the routes and schema, no query-result mocking.
 
 import { readFileSync, readdirSync } from "node:fs";

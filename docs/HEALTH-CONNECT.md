@@ -11,7 +11,7 @@ because `days` holds it for every calendar day. The trigger engine tests seven
 weather factors against headache and non-headache days.
 
 Recording sleep on *every* day, the way the weather already is, is the only thing
-that turns the sleep belief into a hypothesis that can actually be checked.
+that turns the sleep belief into a hypothesis that can be checked.
 
 ## The constraint (verified, 2026-07)
 
@@ -30,23 +30,23 @@ on-device reader (needs a device; not buildable in this repo's toolchain).
 | Piece | Status |
 |---|---|
 | `days.sleep_minutes`, `sleep_efficiency`, `steps`, `resting_hr`, `hrv_ms` | migration `0005` |
-| `POST /api/days/health` — idempotent, merges partial pushes, **never touches the weather columns** | done |
+| `POST /api/days/health`: idempotent, merges partial pushes, **never touches the weather columns** | done |
 | `GET /api/days/health/coverage` | done |
 | Sleep/steps/HR/HRV added to the trigger engine's factor set | done |
-| `scripts/import-health.mjs` — push any CSV, dry-run by default | done |
+| `scripts/import-health.mjs`: push any CSV, dry-run by default | done |
 | `get_overview` (MCP) reports `control_days.days_with_sleep` | done |
 
 Empty health columns report `insufficient data` and are **excluded from the
 multiple-comparison correction**, so they cannot weaken the weather results merely
 by existing. There is a test for exactly that.
 
-## The one rule that would silently corrupt everything
+## Which day a night's sleep belongs to
 
 **Sleep belongs to the day the sleeper WOKE, not the day they fell asleep.**
 
 The exposure for a headache on day D is the night that *ended* on the morning of D.
 Keying it to the day of falling asleep would shift every value one day out of phase
-with the outcome: not an obvious break, just a confident wrong answer.
+with the outcome. Nothing would visibly break; the results would just be wrong.
 
 `POST /api/days/health` with `sleep_sessions` does this for you (it needs `tz`).
 If you push pre-aggregated `days`, you must have done it yourself.
@@ -123,5 +123,5 @@ So: **roughly six months of continuous nightly data** before `sleep_minutes` can
 return anything other than `insufficient data`.
 
 Like the premonition button, none of this can be backfilled. Every night that goes
-unrecorded is gone. That is the whole argument for starting now rather than after
-the dashboard is pretty.
+unrecorded is gone, which is why recording should start before the dashboard is
+finished.

@@ -198,7 +198,7 @@ export async function triggerAnalysis(db: D1Database): Promise<TriggerAnalysis> 
     factors,
     interpretation: hits.length
       ? `${hits.length} factor(s) show a possible association. This is an association on observational data, not a cause. It is not medical advice.`
-      : "No factor shows evidence of an association at these thresholds. That is a real result, not a failure: it means these weather variables do not explain her headache days.",
+      : "No factor shows evidence of an association at these thresholds. This is a result in its own right: it means these weather variables do not explain her headache days.",
   };
 }
 
@@ -224,7 +224,7 @@ export interface BeliefResult {
 /**
  * Her self-reported trigger tags, held to the same standard as everything else.
  *
- * The honest limitation, stated up front: she only ever recorded these tags on days
+ * The limitation: she only ever recorded these tags on days
  * she had a headache. There is no control group for "Stress", so no analysis in the
  * world can say stress causes her migraines from this data. What CAN be asked is a
  * narrower question: do the days she blamed on X look meteorologically different

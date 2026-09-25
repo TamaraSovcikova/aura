@@ -140,7 +140,7 @@ describe("rowToEpisode", () => {
     const { episode } = rowToEpisode(base);
     expect(episode.self_reported_type).toBe("Left side - temple + eye");
     expect(episode.self_reported_triggers).toBe("Stress; Not enough sleep");
-    // Critically: no side/quality/nausea is inferred from the messy old labels.
+    // No side/quality/nausea is inferred from the messy old labels.
     expect(episode.side).toBeUndefined();
     expect(episode.quality).toBeUndefined();
     expect(episode.source).toBe("obsidian-import");

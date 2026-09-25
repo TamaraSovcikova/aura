@@ -188,7 +188,7 @@ export default function AttackWizard({
   };
 
   // Whether the current page has an answer (including an explicit "not sure"), so
-  // the forward button can honestly say Skip or Next.
+  // the forward button can say Skip or Next.
   const hasAnswer: Record<Step, boolean> = {
     severity: severity !== null || unsure.has("severity"),
     where: attrs.pain_regions.length > 0 || unsure.has("where"),

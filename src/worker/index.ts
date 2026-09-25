@@ -23,7 +23,7 @@ app.use("/api/*", async (c, next) => {
   if (c.req.path === "/api/health") return next();
   const auth = checkPin(c.env.ACCESS_PIN, c.req.header("Authorization"));
   if (auth === "misconfigured") {
-    console.error("ACCESS_PIN is not set — refusing all API requests. Set the secret and redeploy.");
+    console.error("ACCESS_PIN is not set, refusing all API requests. Set the secret and redeploy.");
     return c.json({ error: "server misconfigured" }, 503);
   }
   if (auth === "unauthorized") return c.json({ error: "unauthorized" }, 401);

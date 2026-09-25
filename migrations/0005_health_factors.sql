@@ -14,7 +14,7 @@
 -- can be checked.
 --
 -- These are attached to `days`, not to episodes, because a control day needs them
--- just as much as a headache day does. That is the whole point.
+-- just as much as a headache day does.
 
 -- Sleep is attributed to the day she WOKE, not the day she fell asleep: the
 -- exposure for a headache on day D is the night that ended on the morning of D.

@@ -5,7 +5,7 @@ import type { MedDose } from "../shared/types";
 // two timestamps per dose (taken_at, relief_at) plus the residual level; no test,
 // no inference beyond "this is what the doses say".
 //
-// Honesty rules baked in, matching the rest of Aura:
+// Rules, matching the rest of Aura:
 //  - A dose with no relief recorded is NOT thrown away: it counts against the relief
 //    rate (a dose that did nothing is the most clinically interesting kind).
 //  - Time-to-relief is only ever computed from doses that actually reached relief;

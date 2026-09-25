@@ -41,7 +41,7 @@ describe("headacheDaysTrend", () => {
   it("never compares a part-month against full months", () => {
     // A realistic shape: busy months, then a quiet June, then 3 days of July.
     // Including July fabricates a >=50% reduction, the clinical threshold for a
-    // treatment response. That would be a confident, wrong answer.
+    // treatment response, which would be wrong.
     const rows = [
       m("2026-01", 10), m("2026-02", 12), m("2026-03", 11),
       m("2026-04", 12), m("2026-05", 10), m("2026-06", 6),
@@ -55,7 +55,7 @@ describe("headacheDaysTrend", () => {
     expect(t.prior_3_months).toEqual(["2026-01", "2026-02", "2026-03"]);
     expect(t.recent_mean_headache_days).toBe(9.3);
     expect(t.prior_mean_headache_days).toBe(11);
-    expect(t.meets_50pct_reduction).toBe(false); // the honest answer
+    expect(t.meets_50pct_reduction).toBe(false);
   });
 
   it("refuses to trend without 6 complete months", () => {

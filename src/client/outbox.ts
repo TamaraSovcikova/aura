@@ -67,7 +67,7 @@ const KEY = "aura_outbox";
  * The outbox is a PERSISTED schema. A record written by an older build survives in
  * localStorage across a deploy, so every field added since is optional in the wild
  * and must be defaulted on the way in. Reading a record straight out of JSON and
- * casting it to LocalEpisode is a lie that shows up as a crash the first time new
+ * casting it to LocalEpisode would be wrong and would show up as a crash the first time new
  * code dereferences a field the old build never wrote: `doses` did exactly that,
  * and the render blew up on an attack that was queued before the update.
  *

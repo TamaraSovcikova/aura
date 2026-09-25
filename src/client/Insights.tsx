@@ -2,7 +2,7 @@
 //
 // It was nine peer sections in the order they happened to be built, with random
 // chrome (some carded, some bare), two heading scales, and no difference in weight
-// between an earned answer and a "not yet". Two adjacent sections both said
+// between a result and a "not enough data yet". Two adjacent sections both said
 // "medication" while answering opposite questions, which read as redundancy.
 //
 // It is now ordered by the QUESTION each section answers, roughly in the order she
@@ -11,10 +11,10 @@
 //      used to group a sub-answer INSIDE a section.
 //   2. One heading scale. Section titles are small uppercase; sub-questions inside
 //      a section are sentence case. Nothing else invents a size.
-//   3. Certainty is visible. An earned answer leads with the number. Something not
-//      yet earned is one muted line saying what it still needs. They never look alike.
+//   3. A result leads with its number. Something without enough data yet is one
+//      muted line saying what it still needs, so the two look different.
 //
-// Nothing here is written by a model, and no card softens a null result.
+// Nothing here is written by a model, and a null result is shown as it is.
 
 import { useCallback, useEffect, useState } from "react";
 import type { CycleEvent, Episode } from "../shared/types";
@@ -84,7 +84,7 @@ function SubHead({ children }: { children: React.ReactNode }) {
   return <p className="mb-1.5 text-sm text-zinc-300">{children}</p>;
 }
 
-/** An answer that has been earned. Leads with the number. */
+/** A result. Leads with the number. */
 function Stat({ value, label, tone = "text-zinc-100" }: { value: string | number; label: string; tone?: string }) {
   return (
     <div>
@@ -94,7 +94,7 @@ function Stat({ value, label, tone = "text-zinc-100" }: { value: string | number
   );
 }
 
-/** Something not yet earned. One muted line, always saying what it still needs, so
+/** Not enough data yet. One muted line, always saying what it still needs, so
  *  a gate can never be mistaken for a finding. */
 function Gate({ children }: { children: React.ReactNode }) {
   return <p className="text-xs leading-relaxed text-zinc-500">{children}</p>;
@@ -458,7 +458,7 @@ function Cycle({ events, a }: { events: CycleEvent[]; a: MenstrualAnalysis | nul
 }
 
 /** Everything still gated, in one collapsed place, so four "insufficient data" cards
- *  stop shouting from the middle of the screen. Sections shown above are left out. */
+ *  do not fill the middle of the screen. Sections shown above are left out. */
 const SURFACED = new Set([
   "Is it getting worse?",
   "Migraine or headache?",

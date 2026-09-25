@@ -227,7 +227,7 @@ export async function buildSummary(db: D1Database): Promise<Summary> {
     body: tested.length
       ? hits.length
         ? `${hits.map((h) => h.label).join(", ")} show a possible association. An association, not a cause.`
-        : `${tested.length} factors tested across your headache days and control days. None shows evidence of an association. That is a real result: these weather variables do not explain your headache days.`
+        : `${tested.length} factors tested across your headache days and control days. None shows evidence of an association. This is a result in its own right: these weather variables do not explain your headache days.`
       : "Not enough control days yet to test any factor.",
   });
 

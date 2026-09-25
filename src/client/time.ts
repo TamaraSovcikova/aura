@@ -111,7 +111,7 @@ export function attackTimes(e: {
 
   const start = marked(clockHM(e.started_at), known);
   // The marker goes on the clock only. "~20 Jul, 07:26" would claim the DAY is a
-  // guess, when the day is the one part an estimated onset still gets right.
+  // guess, when an estimated onset still has the right day.
   const startFull = `${dayShort(e.started_at)}, ${start}`;
   const end =
     state === "ended" ? clockHM(e.ended_at as string) : state === "ongoing" ? "ongoing" : "unknown";

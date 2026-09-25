@@ -76,7 +76,7 @@ describe("outbox reconcile", () => {
   });
 });
 
-describe("outbox reconcile — medication doses", () => {
+describe("outbox reconcile: medication doses", () => {
   const dose = (over: Partial<LocalDose> = {}): LocalDose => ({
     ...newLocalDose({ name: "Sumatriptan", taken_at: "2026-07-07T10:30:00.000Z" }),
     ...over,

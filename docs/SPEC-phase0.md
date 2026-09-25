@@ -69,8 +69,8 @@ All routes require `Authorization: Bearer <ACCESS_PIN>`; missing/wrong = 401.
 |---|---|---|---|
 | POST | `/api/episodes/start` | `{lat?, lon?, tz, client_started_at?}` | Create open episode. Server sets `started_at` (or trusts `client_started_at` for offline-synced rows), enriches weather from Open-Meteo best-effort. Returns the row. |
 | POST | `/api/episodes/:id/end` | `{severity?, meds?, note?, client_ended_at?}` | Set `ended_at`, optional fields. Returns the row. |
-| GET | `/api/episodes/current` | — | The open episode (`ended_at IS NULL`) or `null`. |
-| GET | `/api/episodes?limit=30` | — | Recent episodes, newest first. |
+| GET | `/api/episodes/current` | (none) | The open episode (`ended_at IS NULL`) or `null`. |
+| GET | `/api/episodes?limit=30` | (none) | Recent episodes, newest first. |
 | PATCH | `/api/episodes/:id` | partial fields | Fix a mistake. |
 
 Enrichment: on start with `lat`/`lon`, call Open-Meteo

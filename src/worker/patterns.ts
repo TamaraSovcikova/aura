@@ -70,7 +70,7 @@ export async function dayOfWeekAnalysis(db: D1Database): Promise<DayOfWeekAnalys
       ? `Needs at least 90 days with at least 5 per weekday. Currently ${total} days.`
       : verdict === "possible pattern"
         ? "Headache days are not evenly spread across the week. This is an association on observational data, not a cause."
-        : "No evidence that any weekday carries more headache days than another. That is a real result.",
+        : "No evidence that any weekday carries more headache days than another. This is a result in its own right.",
   };
 }
 

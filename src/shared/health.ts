@@ -1,13 +1,11 @@
 // On-device health factors: intake shaping and validation. Pure, no I/O.
 //
-// The one decision here that would silently corrupt the analysis if wrong:
-// WHICH DAY DOES A NIGHT'S SLEEP BELONG TO?
+// The main decision here: which day does a night's sleep belong to?
 //
 // The exposure for a headache on day D is the night that ENDED on the morning of
 // D, not the night that began on D. Attributing sleep to the day she fell asleep
-// would shift every value one day out of phase with the outcome, which is the kind
-// of error that produces a confident, wrong answer instead of an obviously broken
-// one. So sleep is always keyed on the WAKE day.
+// would shift every value one day out of phase with the outcome, and nothing would
+// visibly break. So sleep is always keyed on the WAKE day.
 
 export interface SleepSession {
   /** ISO 8601 instant she fell asleep. */

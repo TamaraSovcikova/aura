@@ -20,7 +20,7 @@ const withPin = () =>
 const noPin = () =>
   ({ DB: d1, ACCESS_PIN: undefined, ASSETS: { fetch: async () => new Response("") } }) as never;
 
-describe("checkPin — fail-closed access", () => {
+describe("checkPin: fail-closed access", () => {
   it("reports a misconfigured server when no PIN is set", () => {
     expect(checkPin(undefined, "Bearer anything")).toBe("misconfigured");
     expect(checkPin("", "Bearer anything")).toBe("misconfigured");

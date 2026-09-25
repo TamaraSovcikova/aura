@@ -80,7 +80,7 @@ describe("triggerAnalysis", () => {
     expect(p.n_headache_days).toBeGreaterThanOrEqual(30);
     expect(p.n_control_days).toBeGreaterThanOrEqual(30);
     expect(p.verdict).toBe("no evidence of association");
-    expect(r.interpretation).toContain("That is a real result");
+    expect(r.interpretation).toContain("a result in its own right");
   });
 
   it("detects a planted effect and reports it as an association, never as a cause", async () => {
@@ -139,7 +139,7 @@ describe("triggerAnalysis", () => {
   });
 
   it("still finds a real within-stratum effect even when a confound is present", async () => {
-    // Same seasonal clustering, but now headache days genuinely fall 5 hPa lower
+    // Same seasonal clustering, but now headache days really fall 5 hPa lower
     // inside every month. Stratifying must not wash a true effect away.
     let seed = 5;
     const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed / 2147483648);

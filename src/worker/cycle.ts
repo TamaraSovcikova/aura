@@ -115,6 +115,6 @@ export async function menstrualAnalysis(db: D1Database): Promise<MenstrualAnalys
       ? `Needs at least ${MIN_EXPOSED} days inside the window, ${MIN_UNEXPOSED} outside, and ${MIN_STRATA} (place, month) strata. Currently ${r.exposed_days}, ${r.unexposed_days} and ${r.strata_used}. There is no cycle data in her history, so this can only be answered by logging period starts from now on: roughly six months of tapping once a month.`
       : verdict === "possible association"
         ? "The odds of a headache differ inside the perimenstrual window. This is an association on observational data, not a cause, and it is not medical advice."
-        : "No evidence that headache odds differ inside the perimenstrual window, at these thresholds. That is a real result, not a failure.",
+        : "No evidence that headache odds differ inside the perimenstrual window, at these thresholds. This is a result in its own right.",
   };
 }

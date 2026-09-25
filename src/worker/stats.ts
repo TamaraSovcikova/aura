@@ -175,9 +175,8 @@ export async function monthlyHeadacheDays(
  *
  * Only COMPLETE months are used. Including the current, still-running month makes
  * the recent mean look artificially low and can fabricate a ">=50% reduction",
- * which is the exact threshold clinicians read as a treatment response. That
- * would be a plausible, confident, wrong answer to the question she cares about
- * most, so partial months are excluded rather than explained away.
+ * which is the threshold clinicians read as a treatment response. Partial months
+ * are therefore excluded.
  */
 export type TrendResult =
   | { enough_data: false; complete_months: number; note: string }

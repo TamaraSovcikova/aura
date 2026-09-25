@@ -120,7 +120,7 @@ describe("menstrualAnalysis", () => {
     const r = await menstrualAnalysis(d1);
     expect(r.enough_data).toBe(true);
     expect(r.verdict).toBe("no evidence of association");
-    expect(r.interpretation).toMatch(/real result, not a failure/);
+    expect(r.interpretation).toMatch(/a result in its own right/);
   });
 });
 

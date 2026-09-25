@@ -1,8 +1,8 @@
 // F7: the doctor export.
 //
-// Two formats, both honest about provenance:
-//   * CSV  — every episode, with the derived duration and the day's factors.
-//   * HTML — a print-ready summary. A neurologist works in monthly headache days,
+// Two formats, both stating where each number comes from:
+//   * CSV: every episode, with the derived duration and the day's factors.
+//   * HTML: a print-ready summary. A neurologist works in monthly headache days,
 //            so that is what leads. Print to PDF from the browser; generating a PDF
 //            inside a Worker would mean shipping a rendering engine to say the same
 //            thing worse.
@@ -17,7 +17,7 @@ import { cycleContext } from "../shared/cycle";
 import { loadPeriodStarts } from "./cycle";
 import { classifyAttack, rowToAttackAttributes, type Ichd3Verdict } from "../shared/ichd3";
 
-/** "45 min" / "1.5 hr" / "-" — how the doctor sheet phrases a time-to-relief. */
+/** "45 min" / "1.5 hr" / "-": how the doctor sheet phrases a time-to-relief. */
 const fmtMinutes = (mins: number | null): string =>
   mins === null ? "-" : mins < 90 ? `${Math.round(mins)} min` : `${(mins / 60).toFixed(1)} hr`;
 
@@ -107,7 +107,7 @@ export async function doctorHtml(db: D1Database): Promise<string> {
     : `<tr><td colspan="5">No medication entries recorded.</td></tr>`;
 
   // Medication response: only ever rendered from doses she logged in-app, with the
-  // same honesty as the app (a dose with no relief counts as one that did not work;
+  // same rules as the app (a dose with no relief counts as one that did not work;
   // times come only from doses that reached relief). The imported diary has none.
   const medResponseSection = (() => {
     if (medResp.verdict !== "summary") {
@@ -188,7 +188,7 @@ ${s.insights.map((i) => `<li><strong>${html(i.title)}.</strong> ${html(i.body)}<
 // the page level); the detail is human-readable tables. It is a READ-ONLY snapshot:
 // the app is the source of truth, so the header says to edit there, not here.
 //
-// Every honesty rule from the app carries over: headache days and migraine days are
+// Every rule from the app carries over: headache days and migraine days are
 // separate, imported rows are marked and never classified, an estimated onset shows
 // a "~", and the migraine verdict is the criteria's, never a diagnosis.
 

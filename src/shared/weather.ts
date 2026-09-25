@@ -2,8 +2,7 @@
 //
 // These are the CONTROL days. Trigger statistics need the days she did not get a
 // migraine, and they are reconstructed here from an objective archive rather than
-// demanded from her as daily logging. That is the whole thesis, extended into
-// analytics.
+// demanded from her as daily logging.
 //
 // No network, no clock, no database. Everything here is testable.
 

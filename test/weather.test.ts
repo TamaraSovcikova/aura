@@ -145,7 +145,7 @@ describe("location blocking", () => {
 describe("timeline and migration cannot drift", () => {
   // The importer reads scripts/lib/timeline.mjs; the Worker reads the `locations`
   // table seeded by migration 0004. If they disagree, weather is attributed to the
-  // wrong country and every trigger conclusion is quietly wrong.
+  // wrong country and every trigger conclusion is wrong.
   const sql = readFileSync(join(here, "..", "migrations", "0004_locations_and_days.sql"), "utf8");
 
   it("seeds every timeline row into the locations table", () => {

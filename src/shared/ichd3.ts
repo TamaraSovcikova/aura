@@ -34,7 +34,7 @@ export type Ichd3Verdict =
   | "unclassified";
 
 /** VAS 6+ is taken as moderate-or-severe. Below the clinical qualitative cut, a lower
- *  number is genuinely mild, so this is a defensible mapping rather than a guess. */
+ *  number is mild, so this is a defensible mapping rather than a guess. */
 const MODERATE_SEVERE = 6;
 
 /** ICHD-3 caps a migraine attack at 4-72h. */

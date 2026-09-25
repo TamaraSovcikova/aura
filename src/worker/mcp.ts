@@ -1,4 +1,4 @@
-// Aura MCP server — JSON-RPC 2.0 over HTTP (MCP streamable-HTTP transport).
+// Aura MCP server: JSON-RPC 2.0 over HTTP (MCP streamable-HTTP transport).
 // Mount at /mcp. Auth: Authorization: Bearer <ACCESS_PIN>, or ?token=<ACCESS_PIN>
 // for cloud-brokered connectors whose UI takes a URL but no headers.
 //
@@ -131,7 +131,7 @@ const TOOLS = [
     description:
       "Case-control test of whether objective day-level factors (barometric pressure and its 24h change, sharpest 3h fall, temperature, humidity, daylight) differ between headache days and non-headache days. " +
       "Every comparison is stratified by (place, month) so season and country cannot masquerade as a trigger, and Benjamini-Hochberg q-values control the false discovery rate across the seven factors. " +
-      "READ THE `verdict` FIELD, not the raw difference. A verdict of 'no evidence of association' is a real result and must be reported as such, never softened into 'a slight trend'. Nothing here establishes causation, and none of it is medical advice.",
+      "READ THE `verdict` FIELD, not the raw difference. A verdict of 'no evidence of association' is a result and must be reported as one, not described as 'a slight trend'. Nothing here establishes causation, and none of it is medical advice.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -212,7 +212,7 @@ const TOOLS = [
 // ── Tool implementations ─────────────────────────────────────────────────────
 
 /**
- * The window over which we can honestly say a month had N headache days.
+ * The window over which we can say a month had N headache days.
  *
  * It ends at her LAST recorded episode, not today. Zero-filling to "now" would
  * invent migraine-free months out of a simple absence of data: a gap between two
@@ -440,7 +440,7 @@ async function handleTool(
 mcp.post("/", async (c) => {
   const auth = checkPin(c.env.ACCESS_PIN, c.req.header("Authorization"), c.req.query("token"));
   if (auth === "misconfigured") {
-    console.error("ACCESS_PIN is not set — refusing MCP requests. Set the secret and redeploy.");
+    console.error("ACCESS_PIN is not set, refusing MCP requests. Set the secret and redeploy.");
     return c.json(err(null, -32000, "Server misconfigured"), 503);
   }
   if (auth === "unauthorized") return c.json(err(null, -32000, "Unauthorized"), 401);

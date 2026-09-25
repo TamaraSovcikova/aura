@@ -17,7 +17,7 @@
   --color-ember-900: #4a2f18;
 }
 
-/* Atkinson Hyperlegible Next — designed by the Braille Institute for low vision.
+/* Atkinson Hyperlegible Next, designed by the Braille Institute for low vision.
  * A deliberate choice for a migraine app used by light-sensitive people: the most
  * legible free typeface, self-hosted (no CDN) so it works offline and inside the
  * PWA precache. Variable weight 400..700 covers every weight the UI uses. */
